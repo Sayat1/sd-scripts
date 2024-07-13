@@ -383,7 +383,7 @@ def train(args):
                         params_to_clip = unet.parameters()
                     accelerator.unscale_gradients()
                     if args.logging_dir is not None:
-                        pre_clip_norm = torch.nn.utils.clip_grad_norm_(params_to_clip, float('inf'),norm_type='inf')
+                        pre_clip_norm = torch.nn.utils.clip_grad_norm_(params_to_clip, float('inf'))
                         logs = {"optimizer/pre_clip_norm": pre_clip_norm}
                         accelerator.log(logs, step=global_step)     
                     grad_norm = torch.nn.utils.clip_grad_norm_(params_to_clip, args.max_grad_norm)
