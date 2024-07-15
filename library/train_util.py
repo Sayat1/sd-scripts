@@ -4105,6 +4105,11 @@ def get_optimizer(args, trainable_params):
     optimizer_name = optimizer_class.__module__ + "." + optimizer_class.__name__
     optimizer_args = ",".join([f"{k}={v}" for k, v in optimizer_kwargs.items()])
 
+    arguments = vars(optimizer).get("defaults",None)
+    logger.info(f"final optimizer args | {arguments}")
+    print(f"final optimizer args | {arguments}")
+    del arguments
+
     return optimizer_name, optimizer_args, optimizer
 
 
