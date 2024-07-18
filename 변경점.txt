@@ -1,0 +1,3 @@
+Sample OUTPUT DIR추가
+MAX GARD NORM logging (train_DB)
+final optimizer arguments 출력
