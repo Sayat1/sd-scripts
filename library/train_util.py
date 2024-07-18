@@ -2929,6 +2929,10 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
     parser.add_argument(
         "--output_name", type=str, default=None, help="base name of trained model file / 学習後のモデルの拡張子を除くファイル名"
     )
+
+    parser.add_argument(
+        "--sample_dir", type=str, default=None, help="directory to output sampled images"
+    )
     parser.add_argument(
         "--huggingface_repo_id",
         type=str,
@@ -3401,6 +3405,7 @@ def verify_command_line_training_args(args: argparse.Namespace):
         "conditioning_data_dir",
         "reg_data_dir",
         "output_dir",
+        "sample_dir",
         "logging_dir",
     ]
 
@@ -5181,7 +5186,10 @@ def sample_images_common(
         clip_skip=args.clip_skip,
     )
     pipeline.to(distributed_state.device)
-    save_dir = args.output_dir + "/sample"
+    if args.sample_dir:
+        save_dir = args.sample_dir
+    else:
+        save_dir = args.output_dir + "/sample"
     os.makedirs(save_dir, exist_ok=True)
 
     # preprocess prompts
