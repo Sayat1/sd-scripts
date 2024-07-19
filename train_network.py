@@ -79,17 +79,31 @@ class NetworkTrainer:
                 logs["lr/d*lr"] = (
                     lr_scheduler.optimizers[-1].param_groups[0]["d"] * lr_scheduler.optimizers[-1].param_groups[0]["lr"]
                 )
+
+            if args.use_mechanic:
+                s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
+                s_sum = torch.sum(s).item()
+                logs["lr/s*lr"] = (
+                    s_sum * lr_scheduler.optimizers[-1].param_groups[0]["lr"]
+                )
         else:
             idx = 0
             if not args.network_train_unet_only:
                 logs["lr/textencoder"] = float(lrs[0])
                 idx = 1
+            if args.use_mechanic:
+                s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
+                s_sum = torch.sum(s).item()
 
             for i in range(idx, len(lrs)):
                 logs[f"lr/group{i}"] = float(lrs[i])
                 if args.optimizer_type.lower().startswith("DAdapt".lower()) or args.optimizer_type.lower() == "Prodigy".lower():
                     logs[f"lr/d*lr/group{i}"] = (
                         lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
+                    )
+                if args.use_mechanic:
+                    logs["lr/s*lr"] = (
+                        s_sum * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
                     )
 
         return logs
