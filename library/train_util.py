@@ -2859,6 +2859,12 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
         help="Optimizer to use / オプティマイザの種類: AdamW (default), AdamW8bit, PagedAdamW, PagedAdamW8bit, PagedAdamW32bit, Lion8bit, PagedLion8bit, Lion, SGDNesterov, SGDNesterov8bit, DAdaptation(DAdaptAdamPreprint), DAdaptAdaGrad, DAdaptAdam, DAdaptAdan, DAdaptAdanIP, DAdaptLion, DAdaptSGD, AdaFactor",
     )
 
+    parser.add_argument(
+        "--use_mechanic",
+        action="store_true",
+        help="Mechanic aims to remove the need for tuning a learning rate scalar",
+    )
+
     # backward compatibility
     parser.add_argument(
         "--use_8bit_adam",
@@ -3882,7 +3888,12 @@ def get_optimizer(args, trainable_params):
             raise ImportError("No lion_pytorch / lion_pytorch がインストールされていないようです")
         logger.info(f"use Lion optimizer | {optimizer_kwargs}")
         optimizer_class = lion_pytorch.Lion
-        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+        if args.use_mechanic:
+            from mechanic_pytorch import mechanize
+            print("use mechanize")
+            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+        else:
+            optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
     elif optimizer_type.endswith("8bit".lower()):
         try:
@@ -3893,7 +3904,12 @@ def get_optimizer(args, trainable_params):
         if optimizer_type == "AdamW8bit".lower():
             logger.info(f"use 8-bit AdamW optimizer | {optimizer_kwargs}")
             optimizer_class = bnb.optim.AdamW8bit
-            optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+            if args.use_mechanic:
+                from mechanic_pytorch import mechanize
+                print("use mechanize")
+                optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+            else:
+                optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
         elif optimizer_type == "SGDNesterov8bit".lower():
             logger.info(f"use 8-bit SGD with Nesterov optimizer | {optimizer_kwargs}")
@@ -3904,7 +3920,13 @@ def get_optimizer(args, trainable_params):
                 optimizer_kwargs["momentum"] = 0.9
 
             optimizer_class = bnb.optim.SGD8bit
-            optimizer = optimizer_class(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
+            if args.use_mechanic:
+                from mechanic_pytorch import mechanize
+                print("use mechanize")
+                optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
+            else:
+                optimizer = optimizer_class(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
+            
 
         elif optimizer_type == "Lion8bit".lower():
             logger.info(f"use 8-bit Lion optimizer | {optimizer_kwargs}")
@@ -3931,7 +3953,12 @@ def get_optimizer(args, trainable_params):
                     "No PagedLion8bit. The version of bitsandbytes installed seems to be old. Please install 0.39.0 or later. / PagedLion8bitが定義されていません。インストールされているbitsandbytesのバージョンが古いようです。0.39.0以上をインストールしてください"
                 )
 
-        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+        if args.use_mechanic:
+            from mechanic_pytorch import mechanize
+            print("use mechanize")
+            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+        else:
+            optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
     elif optimizer_type == "PagedAdamW".lower():
         logger.info(f"use PagedAdamW optimizer | {optimizer_kwargs}")
@@ -3945,7 +3972,12 @@ def get_optimizer(args, trainable_params):
             raise AttributeError(
                 "No PagedAdamW. The version of bitsandbytes installed seems to be old. Please install 0.39.0 or later. / PagedAdamWが定義されていません。インストールされているbitsandbytesのバージョンが古いようです。0.39.0以上をインストールしてください"
             )
-        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+        if args.use_mechanic:
+            from mechanic_pytorch import mechanize
+            print("use mechanize")
+            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+        else:
+            optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
     elif optimizer_type == "PagedAdamW32bit".lower():
         logger.info(f"use 32-bit PagedAdamW optimizer | {optimizer_kwargs}")
@@ -3959,7 +3991,12 @@ def get_optimizer(args, trainable_params):
             raise AttributeError(
                 "No PagedAdamW32bit. The version of bitsandbytes installed seems to be old. Please install 0.39.0 or later. / PagedAdamW32bitが定義されていません。インストールされているbitsandbytesのバージョンが古いようです。0.39.0以上をインストールしてください"
             )
-        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+        if args.use_mechanic:
+            from mechanic_pytorch import mechanize
+            print("use mechanize")
+            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+        else:
+            optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
     elif optimizer_type == "SGDNesterov".lower():
         logger.info(f"use SGD with Nesterov optimizer | {optimizer_kwargs}")
@@ -3970,7 +4007,12 @@ def get_optimizer(args, trainable_params):
             optimizer_kwargs["momentum"] = 0.9
 
         optimizer_class = torch.optim.SGD
-        optimizer = optimizer_class(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
+        if args.use_mechanic:
+            from mechanic_pytorch import mechanize
+            print("use mechanize")
+            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+        else:
+            optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
     elif optimizer_type.startswith("DAdapt".lower()) or optimizer_type == "Prodigy".lower():
         # check lr and lr_count, and logger.info warning
@@ -4086,12 +4128,22 @@ def get_optimizer(args, trainable_params):
                 logger.warning(f"clip_threshold=1.0 will be good / clip_thresholdは1.0が良いかもしれません")
 
         optimizer_class = transformers.optimization.Adafactor
-        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+        if args.use_mechanic:
+            from mechanic_pytorch import mechanize
+            print("use mechanize")
+            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+        else:
+            optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
     elif optimizer_type == "AdamW".lower():
         logger.info(f"use AdamW optimizer | {optimizer_kwargs}")
         optimizer_class = torch.optim.AdamW
-        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+        if args.use_mechanic:
+            from mechanic_pytorch import mechanize
+            print("use mechanize")
+            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+        else:
+            optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
     if optimizer is None:
         # 任意のoptimizerを使う
@@ -4105,7 +4157,12 @@ def get_optimizer(args, trainable_params):
             optimizer_type = values[-1]
 
         optimizer_class = getattr(optimizer_module, optimizer_type)
-        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+        if args.use_mechanic:
+            from mechanic_pytorch import mechanize
+            print("use mechanize")
+            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+        else:
+            optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
     optimizer_name = optimizer_class.__module__ + "." + optimizer_class.__name__
     optimizer_args = ",".join([f"{k}={v}" for k, v in optimizer_kwargs.items()])
