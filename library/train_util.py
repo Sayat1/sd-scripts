@@ -5022,18 +5022,21 @@ def conditional_loss(
     return loss
 
 
-def append_lr_to_logs(logs, lr_scheduler, optimizer_type, including_unet=True):
+def append_lr_to_logs(logs, lr_scheduler, optimizer_type, including_unet=True, use_mechanic=False):
     names = []
     if including_unet:
         names.append("unet")
     names.append("text_encoder1")
     names.append("text_encoder2")
 
-    append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names)
+    append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names, use_mechanic)
 
 
-def append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names):
+def append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names, use_mechanic):
     lrs = lr_scheduler.get_last_lr()
+    if use_mechanic:
+        s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
+        s_sum = torch.sum(s).item()
 
     for lr_index in range(len(lrs)):
         name = names[lr_index]
@@ -5042,6 +5045,10 @@ def append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names):
         if optimizer_type.lower().startswith("DAdapt".lower()) or optimizer_type.lower() == "Prodigy".lower():
             logs["lr/d*lr/" + name] = (
                 lr_scheduler.optimizers[-1].param_groups[lr_index]["d"] * lr_scheduler.optimizers[-1].param_groups[lr_index]["lr"]
+            )
+        if use_mechanic:
+            logs["lr/s*lr/" + name] = (
+                s_sum * lr_scheduler.optimizers[-1].param_groups[lr_index]["lr"]
             )
 
 

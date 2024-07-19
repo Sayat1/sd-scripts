@@ -428,7 +428,7 @@ def train(args):
             current_loss = loss.detach().item()
             if args.logging_dir is not None:
                 logs = {"loss": current_loss}
-                train_util.append_lr_to_logs(logs, lr_scheduler, args.optimizer_type, including_unet=True)
+                train_util.append_lr_to_logs(logs, lr_scheduler, args.optimizer_type, including_unet=True, args.use_mechanic)
                 accelerator.log(logs, step=global_step)
 
             loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
