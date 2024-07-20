@@ -3891,7 +3891,7 @@ def get_optimizer(args, trainable_params):
         if args.use_mechanic:
             from mechanic_pytorch import mechanize
             print("use mechanize")
-            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+            optimizer = mechanize(optimizer_class,s_decay=optimizer_kwargs.get("weight_decay",0.01))(trainable_params, lr=lr, **optimizer_kwargs)
         else:
             optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
@@ -3907,7 +3907,7 @@ def get_optimizer(args, trainable_params):
             if args.use_mechanic:
                 from mechanic_pytorch import mechanize
                 print("use mechanize")
-                optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+                optimizer = mechanize(optimizer_class,s_decay=optimizer_kwargs.get("weight_decay",0.01))(trainable_params, lr=lr, **optimizer_kwargs)
             else:
                 optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
@@ -3923,7 +3923,7 @@ def get_optimizer(args, trainable_params):
             if args.use_mechanic:
                 from mechanic_pytorch import mechanize
                 print("use mechanize")
-                optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
+                optimizer = mechanize(optimizer_class,s_decay=optimizer_kwargs.get("weight_decay",0.01))(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
             else:
                 optimizer = optimizer_class(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
             
@@ -3956,7 +3956,7 @@ def get_optimizer(args, trainable_params):
         if args.use_mechanic:
             from mechanic_pytorch import mechanize
             print("use mechanize")
-            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+            optimizer = mechanize(optimizer_class,s_decay=optimizer_kwargs.get("weight_decay",0.01))(trainable_params, lr=lr, **optimizer_kwargs)
         else:
             optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
@@ -3975,7 +3975,7 @@ def get_optimizer(args, trainable_params):
         if args.use_mechanic:
             from mechanic_pytorch import mechanize
             print("use mechanize")
-            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+            optimizer = mechanize(optimizer_class,s_decay=optimizer_kwargs.get("weight_decay",0.01))(trainable_params, lr=lr, **optimizer_kwargs)
         else:
             optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
@@ -3994,7 +3994,7 @@ def get_optimizer(args, trainable_params):
         if args.use_mechanic:
             from mechanic_pytorch import mechanize
             print("use mechanize")
-            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+            optimizer = mechanize(optimizer_class,s_decay=optimizer_kwargs.get("weight_decay",0.01))(trainable_params, lr=lr, **optimizer_kwargs)
         else:
             optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
@@ -4010,7 +4010,7 @@ def get_optimizer(args, trainable_params):
         if args.use_mechanic:
             from mechanic_pytorch import mechanize
             print("use mechanize")
-            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+            optimizer = mechanize(optimizer_class,s_decay=optimizer_kwargs.get("weight_decay",0.01))(trainable_params, lr=lr, **optimizer_kwargs)
         else:
             optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
@@ -4131,7 +4131,7 @@ def get_optimizer(args, trainable_params):
         if args.use_mechanic:
             from mechanic_pytorch import mechanize
             print("use mechanize")
-            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+            optimizer = mechanize(optimizer_class,s_decay=optimizer_kwargs.get("weight_decay",0.01))(trainable_params, lr=lr, **optimizer_kwargs)
         else:
             optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
@@ -4141,7 +4141,7 @@ def get_optimizer(args, trainable_params):
         if args.use_mechanic:
             from mechanic_pytorch import mechanize
             print("use mechanize")
-            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+            optimizer = mechanize(optimizer_class,s_decay=optimizer_kwargs.get("weight_decay",0.01))(trainable_params, lr=lr, **optimizer_kwargs)
         else:
             optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
@@ -4160,7 +4160,7 @@ def get_optimizer(args, trainable_params):
         if args.use_mechanic:
             from mechanic_pytorch import mechanize
             print("use mechanize")
-            optimizer = mechanize(optimizer_class)(trainable_params, lr=lr, **optimizer_kwargs)
+            optimizer = mechanize(optimizer_class,s_decay=optimizer_kwargs.get("weight_decay",0.01))(trainable_params, lr=lr, **optimizer_kwargs)
         else:
             optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
