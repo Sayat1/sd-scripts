@@ -6,11 +6,6 @@ ftfy==6.1.1
 opencv-python==4.7.0.68
 einops==0.7.0
 pytorch-lightning==1.9.0
-lycoris_lora
-prodigyopt
-dadaptation
-lion-pytorch
-schedulefree
 tensorboard
 scipy==1.11.4
 safetensors==0.4.2

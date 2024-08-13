@@ -1,0 +1,5 @@
+lycoris_lora
+prodigyopt
+dadaptation
+lion-pytorch
+schedulefree
