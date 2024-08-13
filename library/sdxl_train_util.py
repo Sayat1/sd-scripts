@@ -66,6 +66,8 @@ def _load_target_model(
     name_or_path = os.readlink(name_or_path) if os.path.islink(name_or_path) else name_or_path
     load_stable_diffusion_format = os.path.isfile(name_or_path)  # determine SD or Diffusers
 
+    print(device)
+    print(model_dtype)
     if load_stable_diffusion_format:
         logger.info(f"load StableDiffusion checkpoint: {name_or_path}")
         (
@@ -79,18 +81,17 @@ def _load_target_model(
     else:
         # Diffusers model is loaded to CPU
         from diffusers import StableDiffusionXLPipeline
-
         variant = "fp16" if weight_dtype == torch.float16 else None
         logger.info(f"load Diffusers pretrained models: {name_or_path}, variant={variant}")
         try:
             try:
                 pipe = StableDiffusionXLPipeline.from_pretrained(
-                    name_or_path, torch_dtype=model_dtype, variant=variant, tokenizer=None
+                    name_or_path, variant=variant, tokenizer=None,torch_dtype=torch.float16,
                 )
             except ValueError as ex:
                 if variant is not None:
                     logger.info("try to load fp32 model")
-                    pipe = StableDiffusionXLPipeline.from_pretrained(name_or_path, variant=None, tokenizer=None)
+                    pipe = StableDiffusionXLPipeline.from_pretrained(name_or_path, variant=None,torch_dtype=torch.float16, tokenizer=None)
                 else:
                     raise ex
         except EnvironmentError as ex:
