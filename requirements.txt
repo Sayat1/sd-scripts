@@ -1,6 +1,6 @@
 accelerate==0.30.0
 transformers==4.38.0
-diffusers[torch]
+diffusers[torch]==0.30.0
 ftfy==6.1.1
 # albumentations==1.3.0
 opencv-python==4.7.0.68
