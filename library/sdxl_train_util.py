@@ -84,12 +84,12 @@ def _load_target_model(
         try:
             try:
                 pipe = StableDiffusionXLPipeline.from_pretrained(
-                    name_or_path, variant=variant, tokenizer=None,torch_dtype=torch.float16,device_map="auto",
+                    name_or_path, variant=variant, tokenizer=None,torch_dtype=model_dtype,device_map="auto",
                 )
             except ValueError as ex:
                 if variant is not None:
                     logger.info("try to load fp32 model")
-                    pipe = StableDiffusionXLPipeline.from_pretrained(name_or_path, variant=None,torch_dtype=torch.float16,device_map="auto", tokenizer=None)
+                    pipe = StableDiffusionXLPipeline.from_pretrained(name_or_path, variant=None,torch_dtype=model_dtype,device_map="auto", tokenizer=None)
                 else:
                     raise ex
         except EnvironmentError as ex:
@@ -102,10 +102,10 @@ def _load_target_model(
         text_encoder2 = pipe.text_encoder_2
 
         # convert to fp32 for cache text_encoders outputs
-        if text_encoder1.dtype != torch.float32:
-            text_encoder1 = text_encoder1.to(dtype=torch.float32)
-        if text_encoder2.dtype != torch.float32:
-            text_encoder2 = text_encoder2.to(dtype=torch.float32)
+        # if text_encoder1.dtype != torch.float32:
+        #     text_encoder1 = text_encoder1.to(dtype=torch.float32)
+        # if text_encoder2.dtype != torch.float32:
+        #     text_encoder2 = text_encoder2.to(dtype=torch.float32)
 
         vae = pipe.vae
         unet = pipe.unet
