@@ -1,4 +1,4 @@
--e git+https://github.com/Sayat1/LyCORIS@egg=lycoris_lora
+-e git+https://github.com/Sayat1/LyCORIS#egg=lycoris_lora
 prodigyopt
 dadaptation
 lion-pytorch
