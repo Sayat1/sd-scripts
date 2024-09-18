@@ -395,13 +395,13 @@ class NetworkTrainer:
                 args.mixed_precision == "fp16"
             ), "full_fp16 requires mixed precision='fp16' / full_fp16を使う場合はmixed_precision='fp16'を指定してください。"
             accelerator.print("enable full fp16 training.")
-            network.to(weight_dtype)
+            network.to(dtype=weight_dtype)
         elif args.full_bf16:
             assert (
                 args.mixed_precision == "bf16"
             ), "full_bf16 requires mixed precision='bf16' / full_bf16を使う場合はmixed_precision='bf16'を指定してください。"
             accelerator.print("enable full bf16 training.")
-            network.to(weight_dtype)
+            network.to(dtype=weight_dtype)
 
         unet_weight_dtype = te_weight_dtype = weight_dtype
         # Experimental Feature: Put base model into fp8 to save vram
