@@ -2232,6 +2232,9 @@ def debug_dataset(train_dataset, show_input_ids=False):
                         cv2.imshow("img", im)
                         k = cv2.waitKey()
                         cv2.destroyAllWindows()
+                    else:
+                        os.mkdir("/content/debug/")
+                        cv2.imwrite(f"/content/debug/{epoch}_{steps}.jpg", im)
                     if k == 27 or k == ord("s") or k == ord("e"):
                         break
             steps += 1
@@ -2242,6 +2245,8 @@ def debug_dataset(train_dataset, show_input_ids=False):
                 k = 27
                 break
         if k == 27:
+            break
+        if epoch == 2:
             break
 
         epoch += 1
@@ -2375,7 +2380,8 @@ def trim_and_resize_if_required(
         trim_size = image_height - reso[1]
         p = trim_size // 2 if not random_crop else random.randint(0, trim_size)
         # logger.info(f"h {trim_size} {p})
-        image = image[p : p + reso[1]]
+        #중간을 자르지 않고 위에서부터 자름
+        image = image[: reso[1]]
 
     # random cropの場合のcropされた値をどうcrop left/topに反映するべきか全くアイデアがない
     # I have no idea how to reflect the cropped value in crop left/top in the case of random crop
