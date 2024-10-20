@@ -64,47 +64,51 @@ class NetworkTrainer:
 
         lrs = lr_scheduler.get_last_lr()
 
-        if args.network_train_text_encoder_only or len(lrs) <= 2:  # not block lr (or single block)
-            if args.network_train_unet_only:
-                logs["lr/unet"] = float(lrs[0])
-            elif args.network_train_text_encoder_only:
-                logs["lr/textencoder"] = float(lrs[0])
-            else:
-                logs["lr/textencoder"] = float(lrs[0])
-                logs["lr/unet"] = float(lrs[-1])  # may be same to textencoder
+        # if args.network_train_text_encoder_only or len(lrs) <= 2:  # not block lr (or single block)
+        #     if args.network_train_unet_only:
+        #         logs["lr/unet"] = float(lrs[0])
+        #     elif args.network_train_text_encoder_only:
+        #         logs["lr/textencoder"] = float(lrs[0])
+        #     else:
+        #         logs["lr/textencoder"] = float(lrs[0])
+        #         logs["lr/unet"] = float(lrs[-1])  # may be same to textencoder
 
-            if (
-                "DAdapt".lower() in args.optimizer_type.lower() or "Prodigy".lower() in args.optimizer_type.lower()
-            ):  # tracking d*lr value of unet.
-                logs["lr/d*lr"] = (
-                    lr_scheduler.optimizers[-1].param_groups[0]["d"] * lr_scheduler.optimizers[-1].param_groups[0]["lr"]
+        #     if (
+        #         "DAdapt".lower() in args.optimizer_type.lower() or "Prodigy".lower() in args.optimizer_type.lower()
+        #     ):  # tracking d*lr value of unet.
+        #         logs["lr/d*lr"] = (
+        #             lr_scheduler.optimizers[-1].param_groups[0]["d"] * lr_scheduler.optimizers[-1].param_groups[0]["lr"]
+        #         )
+
+        #     if args.use_mechanic:
+        #         s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
+        #         s_sum = torch.sum(s).item()
+        #         logs["lr/s*lr"] = (
+        #             s_sum * lr_scheduler.optimizers[-1].param_groups[0]["lr"]
+        #         )
+        # else:
+        #     idx = 0
+        #     if not args.network_train_unet_only:
+        #         logs["lr/textencoder"] = float(lrs[0])
+        #         idx = 1
+        #     if args.use_mechanic:
+        #         s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
+        #         s_sum = torch.sum(s).item()
+
+        if args.use_mechanic:
+            s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
+            s_sum = torch.sum(s).item()
+
+        for i in range(len(lrs)):
+            logs[f"lr/group{i}"] = float(lrs[i])
+            if "DAdapt".lower() in args.optimizer_type.lower() or "Prodigy".lower() in args.optimizer_type.lower():
+                logs[f"lr/d*lr/group{i}"] = (
+                    lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
                 )
-
             if args.use_mechanic:
-                s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
-                s_sum = torch.sum(s).item()
                 logs["lr/s*lr"] = (
-                    s_sum * lr_scheduler.optimizers[-1].param_groups[0]["lr"]
+                    s_sum * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
                 )
-        else:
-            idx = 0
-            if not args.network_train_unet_only:
-                logs["lr/textencoder"] = float(lrs[0])
-                idx = 1
-            if args.use_mechanic:
-                s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
-                s_sum = torch.sum(s).item()
-
-            for i in range(idx, len(lrs)):
-                logs[f"lr/group{i}"] = float(lrs[i])
-                if "DAdapt".lower() in args.optimizer_type.lower() or "Prodigy".lower() in args.optimizer_type.lower():
-                    logs[f"lr/d*lr/group{i}"] = (
-                        lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
-                    )
-                if args.use_mechanic:
-                    logs["lr/s*lr"] = (
-                        s_sum * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
-                    )
 
         return logs
 
