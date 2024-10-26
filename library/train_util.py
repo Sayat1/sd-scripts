@@ -2862,7 +2862,7 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
         "--optimizer_type",
         type=str,
         default="",
-        help="Optimizer to use / オプティマイザの種類: AdamW (default), AdamW8bit, PagedAdamW, PagedAdamW8bit, PagedAdamW32bit, Lion8bit, PagedLion8bit, Lion, SGDNesterov, SGDNesterov8bit, DAdaptation(DAdaptAdamPreprint), DAdaptAdaGrad, DAdaptAdam, DAdaptAdan, DAdaptAdanIP, DAdaptLion, DAdaptSGD, AdaFactor",
+        help="Optimizer to use / オプティマイザの種類: AdamW (default), AdamW8bit, PagedAdamW, PagedAdamW8bit, PagedAdamW32bit, Lion8bit, PagedLion8bit, Lion, SGD, SGD8bit, DAdaptation(DAdaptAdamPreprint), DAdaptAdaGrad, DAdaptAdam, DAdaptAdan, DAdaptAdanIP, DAdaptLion, DAdaptSGD, AdaFactor",
     )
 
     parser.add_argument(
@@ -3907,16 +3907,16 @@ def get_optimizer(args, trainable_params):
             optimizer_class = bnb.optim.AdamW8bit
             optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
-        elif optimizer_type == "SGDNesterov8bit".lower():
-            logger.info(f"use 8-bit SGD with Nesterov optimizer | {optimizer_kwargs}")
-            if "momentum" not in optimizer_kwargs:
-                logger.warning(
-                    f"8-bit SGD with Nesterov must be with momentum, set momentum to 0.9 / 8-bit SGD with Nesterovはmomentum指定が必須のため0.9に設定します"
-                )
-                optimizer_kwargs["momentum"] = 0.9
+        elif optimizer_type == "SGD8bit".lower():
+            logger.info(f"use 8-bit SGD optimizer | {optimizer_kwargs}")
+            # if "momentum" not in optimizer_kwargs:
+            #     logger.warning(
+            #         f"8-bit SGD with Nesterov must be with momentum, set momentum to 0.9 / 8-bit SGD with Nesterovはmomentum指定が必須のため0.9に設定します"
+            #     )
+            #     optimizer_kwargs["momentum"] = 0.9
 
             optimizer_class = bnb.optim.SGD8bit
-            optimizer = optimizer_class(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
+            optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
             
 
         elif optimizer_type == "Lion8bit".lower():
@@ -3974,13 +3974,13 @@ def get_optimizer(args, trainable_params):
             )
         optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
-    elif optimizer_type == "SGDNesterov".lower():
-        logger.info(f"use SGD with Nesterov optimizer | {optimizer_kwargs}")
-        if "momentum" not in optimizer_kwargs:
-            logger.info(
-                f"SGD with Nesterov must be with momentum, set momentum to 0.9 / SGD with Nesterovはmomentum指定が必須のため0.9に設定します"
-            )
-            optimizer_kwargs["momentum"] = 0.9
+    elif optimizer_type == "SGD".lower():
+        logger.info(f"use SGD optimizer | {optimizer_kwargs}")
+        # if "momentum" not in optimizer_kwargs:
+        #     logger.info(
+        #         f"SGD with Nesterov must be with momentum, set momentum to 0.9 / SGD with Nesterovはmomentum指定が必須のため0.9に設定します"
+        #     )
+        #     optimizer_kwargs["momentum"] = 0.9
 
         optimizer_class = torch.optim.SGD
         optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
