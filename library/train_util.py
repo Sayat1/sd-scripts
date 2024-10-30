@@ -2233,7 +2233,8 @@ def debug_dataset(train_dataset, show_input_ids=False):
                         k = cv2.waitKey()
                         cv2.destroyAllWindows()
                     else:
-                        os.mkdirs("/content/debug/",exist_ok=True)
+                        if not os.path.exists("/content/debug/"):
+                            os.mkdir("/content/debug/")
                         cv2.imwrite(f"/content/debug/{epoch}_{steps}.jpg", im)
                     if k == 27 or k == ord("s") or k == ord("e"):
                         break
