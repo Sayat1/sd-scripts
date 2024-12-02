@@ -96,8 +96,11 @@ class NetworkTrainer:
         #         s_sum = torch.sum(s).item()
 
         if args.use_mechanic:
-            s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
-            s_sum = torch.sum(s).item()
+            if 's' in lr_scheduler.optimizers[-1].state['_mechanic']:
+                s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
+                s_sum = torch.sum(s).item()
+            else:
+                s_sum = 1
 
         for i in range(len(lrs)):
             logs[f"lr/group{i}"] = float(lrs[i])
@@ -298,13 +301,16 @@ class NetworkTrainer:
         self.cache_text_encoder_outputs_if_needed(
             args, accelerator, unet, vae, tokenizers, text_encoders, train_dataset_group, weight_dtype
         )
-
+        text_encoder_lrs = [args.text_encoder_lr]
+        text_encoder_lrs.append(args.text_encoder_lr_2 if args.text_encoder_lr_2!=None else args.text_encoder_lr)
+        train_text_encoder = [tlr!=0 for tlr in text_encoder_lrs]
         # prepare network
         net_kwargs = {}
         if args.network_args is not None:
             for net_arg in args.network_args:
                 key, value = net_arg.split("=")
                 net_kwargs[key] = value
+        net_kwargs['train_text_encoders'] = train_text_encoder
 
         # if a new network is added in future, add if ~ then blocks for each network (;'∀')
         if args.dim_from_weights:
@@ -346,7 +352,9 @@ class NetworkTrainer:
 
         if args.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
-            for t_enc in text_encoders:
+            for t_enc,t_te in zip(text_encoders,train_text_encoder):
+                if not t_te:
+                    continue
                 t_enc.gradient_checkpointing_enable()
             del t_enc
             network.enable_gradient_checkpointing()  # may have no effect
@@ -354,14 +362,15 @@ class NetworkTrainer:
         # 学習に必要なクラスを準備する
         accelerator.print("prepare optimizer, data loader etc.")
 
+        text_encoder_lrs = [tlr for tlr in text_encoder_lrs if tlr!=0]
         # 後方互換性を確保するよ
         try:
-            trainable_params = network.prepare_optimizer_params(args.text_encoder_lr, args.unet_lr, args.learning_rate)
+            trainable_params = network.prepare_optimizer_params(text_encoder_lrs, args.unet_lr, args.learning_rate)
         except TypeError:
             accelerator.print(
                 "Deprecated: use prepare_optimizer_params(text_encoder_lr, unet_lr, learning_rate) instead of prepare_optimizer_params(text_encoder_lr, unet_lr)"
             )
-            trainable_params = network.prepare_optimizer_params(args.text_encoder_lr, args.unet_lr)
+            trainable_params = network.prepare_optimizer_params(text_encoder_lrs, args.unet_lr)
 
         optimizer_name, optimizer_args, optimizer = train_util.get_optimizer(args, trainable_params)
 
@@ -435,8 +444,8 @@ class NetworkTrainer:
             ds_model = deepspeed_utils.prepare_deepspeed_model(
                 args,
                 unet=unet if train_unet else None,
-                text_encoder1=text_encoders[0] if train_text_encoder else None,
-                text_encoder2=text_encoders[1] if train_text_encoder and len(text_encoders) > 1 else None,
+                text_encoder1=text_encoders[0] if train_text_encoder and train_text_encoder[0] else None,
+                text_encoder2=text_encoders[1] if train_text_encoder and len(text_encoders) > 1 and train_text_encoder[1] else None,
                 network=network,
             )
             ds_model, optimizer, train_dataloader = accelerator.prepare(ds_model, optimizer, train_dataloader)
@@ -450,7 +459,7 @@ class NetworkTrainer:
                 unet.to(accelerator.device, dtype=unet_weight_dtype)  # move to device because unet is not prepared by accelerator
             if train_text_encoder:
                 if len(text_encoders) > 1:
-                    text_encoder = text_encoders = [accelerator.prepare(t_enc) for t_enc in text_encoders]
+                    text_encoder = text_encoders = [accelerator.prepare(t_enc) for t_enc,t_te in zip(text_encoders,train_text_encoder) if t_te]
                 else:
                     text_encoder = accelerator.prepare(text_encoder)
                     text_encoders = [text_encoder]
@@ -474,7 +483,9 @@ class NetworkTrainer:
             # according to TI example in Diffusers, train is required
             unet.train()
 
-            for t_enc in text_encoders:
+            for t_enc,t_te in zip(text_encoders,train_text_encoder):
+                if not t_te:
+                    continue
                 t_enc.train()
 
                 # set top parameter requires_grad = True for gradient checkpointing works
@@ -483,7 +494,9 @@ class NetworkTrainer:
 
         else:
             unet.eval()
-            for t_enc in text_encoders:
+            for t_enc,t_te in zip(text_encoders,train_text_encoder):
+                if not t_te:
+                    continue
                 t_enc.eval()
 
         del t_enc
@@ -558,6 +571,7 @@ class NetworkTrainer:
             "ss_output_name": args.output_name,
             "ss_learning_rate": args.learning_rate,
             "ss_text_encoder_lr": args.text_encoder_lr,
+            "ss_text_encoder_lr2": args.text_encoder_lr_2,
             "ss_unet_lr": args.unet_lr,
             "ss_num_train_images": train_dataset_group.num_train_images,
             "ss_num_reg_images": train_dataset_group.num_reg_images,
@@ -1059,6 +1073,7 @@ def setup_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--unet_lr", type=float, default=None, help="learning rate for U-Net / U-Netの学習率")
     parser.add_argument("--text_encoder_lr", type=float, default=None, help="learning rate for Text Encoder / Text Encoderの学習率")
+    parser.add_argument("--text_encoder_lr_2", type=float, default=None, help="learning rate for Text Encoder 2 / Text Encoder2の学習率")
 
     parser.add_argument(
         "--network_weights", type=str, default=None, help="pretrained weights for network / 学習するネットワークの初期重み"

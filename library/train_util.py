@@ -2227,15 +2227,17 @@ def debug_dataset(train_dataset, show_input_ids=False):
                         cond_img = cond_img[:, :, ::-1]
                         if os.name == "nt":
                             cv2.imshow("cond_img", cond_img)
-
+                    debug_folder = ""
                     if os.name == "nt":  # only windows
-                        cv2.imshow("img", im)
-                        k = cv2.waitKey()
-                        cv2.destroyAllWindows()
+                        # cv2.imshow("img", im)
+                        # k = cv2.waitKey()
+                        # cv2.destroyAllWindows()
+                        debug_folder = "./debug/"
                     else:
-                        if not os.path.exists("/content/debug/"):
-                            os.mkdir("/content/debug/")
-                        cv2.imwrite(f"/content/debug/{epoch}_{steps}.jpg", im)
+                        debug_folder = "/content/debug/"
+                    if not os.path.exists(debug_folder):
+                        os.mkdir(debug_folder)
+                    cv2.imwrite(f"{debug_folder}{epoch}_{steps}.jpg", im)
                     if k == 27 or k == ord("s") or k == ord("e"):
                         break
             steps += 1
@@ -2247,7 +2249,7 @@ def debug_dataset(train_dataset, show_input_ids=False):
                 break
         if k == 27:
             break
-        if epoch == 2:
+        if epoch == 1:
             break
 
         epoch += 1
