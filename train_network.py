@@ -303,14 +303,14 @@ class NetworkTrainer:
         )
         text_encoder_lrs = [args.text_encoder_lr]
         text_encoder_lrs.append(args.text_encoder_lr_2 if args.text_encoder_lr_2!=None else args.text_encoder_lr)
-        train_text_encoder = [tlr!=0 for tlr in text_encoder_lrs]
+        train_text_encoders = [tlr!=0 for tlr in text_encoder_lrs]
         # prepare network
         net_kwargs = {}
         if args.network_args is not None:
             for net_arg in args.network_args:
                 key, value = net_arg.split("=")
                 net_kwargs[key] = value
-        net_kwargs['train_text_encoders'] = train_text_encoder
+        net_kwargs['train_text_encoders'] = train_text_encoders
 
         # if a new network is added in future, add if ~ then blocks for each network (;'∀')
         if args.dim_from_weights:
@@ -352,7 +352,7 @@ class NetworkTrainer:
 
         if args.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
-            for t_enc,t_te in zip(text_encoders,train_text_encoder):
+            for t_enc,t_te in zip(text_encoders,train_text_encoders):
                 if not t_te:
                     continue
                 t_enc.gradient_checkpointing_enable()
@@ -459,7 +459,7 @@ class NetworkTrainer:
                 unet.to(accelerator.device, dtype=unet_weight_dtype)  # move to device because unet is not prepared by accelerator
             if train_text_encoder:
                 if len(text_encoders) > 1:
-                    text_encoder = text_encoders = [accelerator.prepare(t_enc) for t_enc,t_te in zip(text_encoders,train_text_encoder) if t_te]
+                    text_encoder = text_encoders = [accelerator.prepare(t_enc) for t_enc in text_encoders]
                 else:
                     text_encoder = accelerator.prepare(text_encoder)
                     text_encoders = [text_encoder]
@@ -483,18 +483,18 @@ class NetworkTrainer:
             # according to TI example in Diffusers, train is required
             unet.train()
 
-            for t_enc,t_te in zip(text_encoders,train_text_encoder):
+            for t_enc,t_te in zip(text_encoders,train_text_encoders):
                 if not t_te:
                     continue
                 t_enc.train()
 
                 # set top parameter requires_grad = True for gradient checkpointing works
-                if train_text_encoder:
+                if t_te:
                     t_enc.text_model.embeddings.requires_grad_(True)
 
         else:
             unet.eval()
-            for t_enc,t_te in zip(text_encoders,train_text_encoder):
+            for t_enc,t_te in zip(text_encoders,train_text_encoders):
                 if not t_te:
                     continue
                 t_enc.eval()
