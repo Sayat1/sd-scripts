@@ -11,6 +11,7 @@ import pathlib
 import re
 import shutil
 import time
+from collections.abc import Callable
 from typing import (
     Dict,
     List,
@@ -4157,6 +4158,20 @@ def get_optimizer(args, trainable_params):
 # Modified version of get_scheduler() function from diffusers.optimizer.get_scheduler
 # Add some checking and features to the original function.
 
+def lr_lambda_warmup(warmup_steps: int, lr_lambda: Callable[[int], float]):
+    def warmup(current_step: int):
+        if current_step < warmup_steps:
+            return float(current_step) / float(warmup_steps)
+        else:
+            return lr_lambda(current_step - warmup_steps)
+
+    return warmup
+
+def lr_lambda_constant():
+    def lr_lambda(current_step: int):
+        return 1
+
+    return lr_lambda
 
 def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
     """
@@ -4190,6 +4205,7 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
 
     # using any lr_scheduler from other library
     if args.lr_scheduler_type:
+        from torch.optim.lr_scheduler import LambdaLR,SequentialLR
         lr_scheduler_type = args.lr_scheduler_type
         logger.info(f"use {lr_scheduler_type} | {lr_scheduler_kwargs} as lr_scheduler")
         if "." not in lr_scheduler_type:  # default to use torch.optim
@@ -4200,7 +4216,19 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
             lr_scheduler_type = values[-1]
         lr_scheduler_class = getattr(lr_scheduler_module, lr_scheduler_type)
         lr_scheduler = lr_scheduler_class(optimizer, **lr_scheduler_kwargs)
-        return wrap_check_needless_num_warmup_steps(lr_scheduler)
+        if num_warmup_steps > 0:
+            warmup_scheduler = LambdaLR(
+                optimizer=optimizer,
+                lr_lambda=lr_lambda_warmup(num_warmup_steps, lr_lambda_constant()),
+                **lr_scheduler_kwargs
+            )
+            scheduler = SequentialLR(
+                optimizer,
+                schedulers=[warmup_scheduler, scheduler],
+                milestones=[num_warmup_steps],
+                **lr_scheduler_kwargs
+            )
+        return scheduler
 
     if name.startswith("adafactor"):
         assert (
