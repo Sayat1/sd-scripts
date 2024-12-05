@@ -4220,15 +4220,15 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
             warmup_scheduler = LambdaLR(
                 optimizer=optimizer,
                 lr_lambda=lr_lambda_warmup(num_warmup_steps, lr_lambda_constant()),
-                **lr_scheduler_kwargs
+                last_epoch=lr_scheduler_kwargs.get("last_epoch",-1)
             )
-            scheduler = SequentialLR(
+            lr_scheduler = SequentialLR(
                 optimizer,
-                schedulers=[warmup_scheduler, scheduler],
+                schedulers=[warmup_scheduler, lr_scheduler],
                 milestones=[num_warmup_steps],
-                **lr_scheduler_kwargs
+                last_epoch=lr_scheduler_kwargs.get("last_epoch",-1)
             )
-        return scheduler
+        return lr_scheduler
 
     if name.startswith("adafactor"):
         assert (
