@@ -3,3 +3,4 @@ prodigyopt
 dadaptation
 lion-pytorch
 schedulefree
+bitsandbytes
