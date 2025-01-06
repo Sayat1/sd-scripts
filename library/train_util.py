@@ -72,7 +72,7 @@ import library.model_util as model_util
 import library.huggingface_util as huggingface_util
 import library.sai_model_spec as sai_model_spec
 import library.deepspeed_utils as deepspeed_utils
-from library.utils import setup_logging
+from library.utils import setup_logging,colab_delete_file
 
 setup_logging()
 import logging
@@ -4840,10 +4840,15 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
 
     last_n_epochs = args.save_last_n_epochs_state if args.save_last_n_epochs_state else args.save_last_n_epochs
     if last_n_epochs is not None:
+        from pathlib import Path
         remove_epoch_no = epoch_no - args.save_every_n_epochs * last_n_epochs
         state_dir_old = os.path.join(args.output_dir, EPOCH_STATE_NAME.format(model_name, remove_epoch_no))
         if os.path.exists(state_dir_old):
             logger.info(f"removing old state: {state_dir_old}")
+            sub_files = Path(state_dir_old).rglob("*.*")
+            for sub_file in sub_files:
+                if not sub_file.is_dir():
+                    colab_delete_file(sub_file)
             shutil.rmtree(state_dir_old)
 
 
@@ -4862,6 +4867,7 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
 
     last_n_steps = args.save_last_n_steps_state if args.save_last_n_steps_state else args.save_last_n_steps
     if last_n_steps is not None:
+        from pathlib import Path
         # last_n_steps前のstep_noから、save_every_n_stepsの倍数のstep_noを計算して削除する
         remove_step_no = step_no - last_n_steps - 1
         remove_step_no = remove_step_no - (remove_step_no % args.save_every_n_steps)
@@ -4870,6 +4876,10 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
             state_dir_old = os.path.join(args.output_dir, STEP_STATE_NAME.format(model_name, remove_step_no))
             if os.path.exists(state_dir_old):
                 logger.info(f"removing old state: {state_dir_old}")
+                sub_files = Path(state_dir_old).rglob("*.*")
+                for sub_file in sub_files:
+                    if not sub_file.is_dir():
+                        colab_delete_file(sub_file)
                 shutil.rmtree(state_dir_old)
 
 

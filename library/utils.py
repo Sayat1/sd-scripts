@@ -12,6 +12,15 @@ from diffusers.schedulers.scheduling_euler_ancestral_discrete import EulerAncest
 def fire_in_thread(f, *args, **kwargs):
     threading.Thread(target=f, args=args, kwargs=kwargs).start()
 
+def colab_delete_file(file_path):
+  import os
+  try:
+    with open(str(file_path),'w') as f:
+      pass
+    os.remove(str(file_path))
+    return True
+  except Exception:
+    return False
 
 def add_logging_arguments(parser):
     parser.add_argument(
