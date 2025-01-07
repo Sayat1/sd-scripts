@@ -8,8 +8,9 @@ from library.device_utils import init_ipex, clean_memory_on_device
 init_ipex()
 
 from accelerate import init_empty_weights
+from diffusers import AutoencoderKL,UNet2DConditionModel
 from tqdm import tqdm
-from transformers import CLIPTokenizer
+from transformers import CLIPTokenizer,PretrainedConfig
 from library import model_util, sdxl_model_util, train_util, sdxl_original_unet
 from library.sdxl_lpw_stable_diffusion import SdxlStableDiffusionLongPromptWeightingPipeline
 from .utils import setup_logging
@@ -58,6 +59,24 @@ def load_target_model(args, accelerator, model_version: str, weight_dtype):
 
     return load_stable_diffusion_format, text_encoder1, text_encoder2, vae, unet, logit_scale, ckpt_info
 
+def import_model_class_from_model_name_or_path(
+    pretrained_model_name_or_path: str, revision: str, subfolder: str = "text_encoder"
+):
+    text_encoder_config = PretrainedConfig.from_pretrained(
+        pretrained_model_name_or_path, subfolder=subfolder, revision=revision
+    )
+    model_class = text_encoder_config.architectures[0]
+
+    if model_class == "CLIPTextModel":
+        from transformers import CLIPTextModel
+
+        return CLIPTextModel
+    elif model_class == "CLIPTextModelWithProjection":
+        from transformers import CLIPTextModelWithProjection
+
+        return CLIPTextModelWithProjection
+    else:
+        raise ValueError(f"{model_class} is not supported.")
 
 def _load_target_model(
     name_or_path: str, vae_path: Optional[str], model_version: str, weight_dtype, device="cpu", model_dtype=None
@@ -78,39 +97,47 @@ def _load_target_model(
         ) = sdxl_model_util.load_models_from_sdxl_checkpoint(model_version, name_or_path, device, model_dtype)
     else:
         # Diffusers model is loaded to CPU
-        from diffusers import StableDiffusionXLPipeline
+        # from diffusers import StableDiffusionXLPipeline
+        # variant = "fp16" if weight_dtype == torch.float16 else None
+        logger.info(f"load Diffusers pretrained models: {name_or_path}")
+        # try:
+        #     try:
+        #         pipe = StableDiffusionXLPipeline.from_pretrained(
+        #             name_or_path, variant=variant, tokenizer=None,torch_dtype=model_dtype,device_map="auto",
+        #         )
+        #     except ValueError as ex:
+        #         if variant is not None:
+        #             logger.info("try to load fp32 model")
+        #             pipe = StableDiffusionXLPipeline.from_pretrained(name_or_path, variant=None,torch_dtype=model_dtype,device_map="auto", tokenizer=None)
+        #         else:
+        #             raise ex
+        # except EnvironmentError as ex:
+        #     logger.error(
+        #         f"model is not found as a file or in Hugging Face, perhaps file name is wrong? / 指定したモデル名のファイル、またはHugging Faceのモデルが見つかりません。ファイル名が誤っているかもしれません: {name_or_path}"
+        #     )
+        #     raise ex
 
-        variant = "fp16" if weight_dtype == torch.float16 else None
-        logger.info(f"load Diffusers pretrained models: {name_or_path}, variant={variant}")
-        try:
-            try:
-                pipe = StableDiffusionXLPipeline.from_pretrained(
-                    name_or_path, torch_dtype=model_dtype, variant=variant, tokenizer=None
-                )
-            except EnvironmentError as ex:
-                if variant is not None:
-                    logger.info("try to load fp32 model")
-                    pipe = StableDiffusionXLPipeline.from_pretrained(name_or_path, variant=None, tokenizer=None)
-                else:
-                    raise ex
-        except EnvironmentError as ex:
-            logger.error(
-                f"model is not found as a file or in Hugging Face, perhaps file name is wrong? / 指定したモデル名のファイル、またはHugging Faceのモデルが見つかりません。ファイル名が誤っているかもしれません: {name_or_path}"
-            )
-            raise ex
+        text_encoder1 = import_model_class_from_model_name_or_path(name_or_path,revision=None).from_pretrained(
+            name_or_path, subfolder="text_encoder", revision=None, variant=None
+        )
+        text_encoder2 = import_model_class_from_model_name_or_path(name_or_path,revision=None,subfolder="text_encoder_2").from_pretrained(
+            name_or_path, subfolder="text_encoder_2", revision=None, variant=None
+        )
 
-        text_encoder1 = pipe.text_encoder
-        text_encoder2 = pipe.text_encoder_2
-
-        # convert to fp32 for cache text_encoders outputs
-        if text_encoder1.dtype != torch.float32:
-            text_encoder1 = text_encoder1.to(dtype=torch.float32)
-        if text_encoder2.dtype != torch.float32:
-            text_encoder2 = text_encoder2.to(dtype=torch.float32)
-
-        vae = pipe.vae
-        unet = pipe.unet
-        del pipe
+        vae_load_path = (
+            name_or_path
+            if vae_path is None
+            else vae_path
+        )
+        vae = AutoencoderKL.from_pretrained(
+            vae_load_path,
+            subfolder="vae" if vae_path is None else None,
+            revision=None,
+            variant=None,
+        )
+        unet = UNet2DConditionModel.from_pretrained(
+            name_or_path, subfolder="unet", revision=None, variant=None, torch_dtype=torch.float16,
+        )
 
         # Diffusers U-Net to original U-Net
         state_dict = sdxl_model_util.convert_diffusers_unet_state_dict_to_sdxl(unet.state_dict())
@@ -122,10 +149,10 @@ def _load_target_model(
         logit_scale = None
         ckpt_info = None
 
-    # VAEを読み込む
-    if vae_path is not None:
-        vae = model_util.load_vae(vae_path, weight_dtype)
-        logger.info("additional VAE loaded")
+    # # VAEを読み込む
+    # if vae_path is not None:
+    #     vae = model_util.load_vae(vae_path, weight_dtype)
+    #     logger.info("additional VAE loaded")
 
     return load_stable_diffusion_format, text_encoder1, text_encoder2, vae, unet, logit_scale, ckpt_info
 

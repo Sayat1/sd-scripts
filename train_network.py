@@ -64,33 +64,54 @@ class NetworkTrainer:
 
         lrs = lr_scheduler.get_last_lr()
 
-        if args.network_train_text_encoder_only or len(lrs) <= 2:  # not block lr (or single block)
-            if args.network_train_unet_only:
-                logs["lr/unet"] = float(lrs[0])
-            elif args.network_train_text_encoder_only:
-                logs["lr/textencoder"] = float(lrs[0])
+        # if args.network_train_text_encoder_only or len(lrs) <= 2:  # not block lr (or single block)
+        #     if args.network_train_unet_only:
+        #         logs["lr/unet"] = float(lrs[0])
+        #     elif args.network_train_text_encoder_only:
+        #         logs["lr/textencoder"] = float(lrs[0])
+        #     else:
+        #         logs["lr/textencoder"] = float(lrs[0])
+        #         logs["lr/unet"] = float(lrs[-1])  # may be same to textencoder
+
+        #     if (
+        #         "DAdapt".lower() in args.optimizer_type.lower() or "Prodigy".lower() in args.optimizer_type.lower()
+        #     ):  # tracking d*lr value of unet.
+        #         logs["lr/d*lr"] = (
+        #             lr_scheduler.optimizers[-1].param_groups[0]["d"] * lr_scheduler.optimizers[-1].param_groups[0]["lr"]
+        #         )
+
+        #     if args.use_mechanic:
+        #         s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
+        #         s_sum = torch.sum(s).item()
+        #         logs["lr/s*lr"] = (
+        #             s_sum * lr_scheduler.optimizers[-1].param_groups[0]["lr"]
+        #         )
+        # else:
+        #     idx = 0
+        #     if not args.network_train_unet_only:
+        #         logs["lr/textencoder"] = float(lrs[0])
+        #         idx = 1
+        #     if args.use_mechanic:
+        #         s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
+        #         s_sum = torch.sum(s).item()
+
+        if args.use_mechanic:
+            if 's' in lr_scheduler.optimizers[-1].state['_mechanic']:
+                s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
+                s_sum = torch.sum(s).item()
             else:
-                logs["lr/textencoder"] = float(lrs[0])
-                logs["lr/unet"] = float(lrs[-1])  # may be same to textencoder
+                s_sum = 1
 
-            if (
-                args.optimizer_type.lower().startswith("DAdapt".lower()) or args.optimizer_type.lower() == "Prodigy".lower()
-            ):  # tracking d*lr value of unet.
-                logs["lr/d*lr"] = (
-                    lr_scheduler.optimizers[-1].param_groups[0]["d"] * lr_scheduler.optimizers[-1].param_groups[0]["lr"]
+        for i in range(len(lrs)):
+            logs[f"lr/group{i}"] = float(lrs[i])
+            if "DAdapt".lower() in args.optimizer_type.lower() or "Prodigy".lower() in args.optimizer_type.lower():
+                logs[f"lr/d*lr/group{i}"] = (
+                    lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
                 )
-        else:
-            idx = 0
-            if not args.network_train_unet_only:
-                logs["lr/textencoder"] = float(lrs[0])
-                idx = 1
-
-            for i in range(idx, len(lrs)):
-                logs[f"lr/group{i}"] = float(lrs[i])
-                if args.optimizer_type.lower().startswith("DAdapt".lower()) or args.optimizer_type.lower() == "Prodigy".lower():
-                    logs[f"lr/d*lr/group{i}"] = (
-                        lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
-                    )
+            if args.use_mechanic:
+                logs[f"lr/s*lr/group{i}"] = (
+                    s_sum * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
+                )
 
         return logs
 
@@ -280,13 +301,16 @@ class NetworkTrainer:
         self.cache_text_encoder_outputs_if_needed(
             args, accelerator, unet, vae, tokenizers, text_encoders, train_dataset_group, weight_dtype
         )
-
+        text_encoder_lrs = [args.text_encoder_lr]
+        text_encoder_lrs.append(args.text_encoder_lr_2 if args.text_encoder_lr_2!=None else args.text_encoder_lr)
+        train_text_encoders = [tlr!=0 for tlr in text_encoder_lrs]
         # prepare network
         net_kwargs = {}
         if args.network_args is not None:
             for net_arg in args.network_args:
                 key, value = net_arg.split("=")
                 net_kwargs[key] = value
+        net_kwargs['train_text_encoders'] = train_text_encoders
 
         # if a new network is added in future, add if ~ then blocks for each network (;'∀')
         if args.dim_from_weights:
@@ -328,7 +352,9 @@ class NetworkTrainer:
 
         if args.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
-            for t_enc in text_encoders:
+            for t_enc,t_te in zip(text_encoders,train_text_encoders):
+                if not t_te:
+                    continue
                 t_enc.gradient_checkpointing_enable()
             del t_enc
             network.enable_gradient_checkpointing()  # may have no effect
@@ -336,14 +362,15 @@ class NetworkTrainer:
         # 学習に必要なクラスを準備する
         accelerator.print("prepare optimizer, data loader etc.")
 
+        text_encoder_lrs = [tlr for tlr in text_encoder_lrs if tlr!=0]
         # 後方互換性を確保するよ
         try:
-            trainable_params = network.prepare_optimizer_params(args.text_encoder_lr, args.unet_lr, args.learning_rate)
+            trainable_params = network.prepare_optimizer_params(text_encoder_lrs, args.unet_lr, args.learning_rate)
         except TypeError:
             accelerator.print(
                 "Deprecated: use prepare_optimizer_params(text_encoder_lr, unet_lr, learning_rate) instead of prepare_optimizer_params(text_encoder_lr, unet_lr)"
             )
-            trainable_params = network.prepare_optimizer_params(args.text_encoder_lr, args.unet_lr)
+            trainable_params = network.prepare_optimizer_params(text_encoder_lrs, args.unet_lr)
 
         optimizer_name, optimizer_args, optimizer = train_util.get_optimizer(args, trainable_params)
 
@@ -381,13 +408,13 @@ class NetworkTrainer:
                 args.mixed_precision == "fp16"
             ), "full_fp16 requires mixed precision='fp16' / full_fp16を使う場合はmixed_precision='fp16'を指定してください。"
             accelerator.print("enable full fp16 training.")
-            network.to(weight_dtype)
+            network.to(dtype=weight_dtype)
         elif args.full_bf16:
             assert (
                 args.mixed_precision == "bf16"
             ), "full_bf16 requires mixed precision='bf16' / full_bf16を使う場合はmixed_precision='bf16'を指定してください。"
             accelerator.print("enable full bf16 training.")
-            network.to(weight_dtype)
+            network.to(dtype=weight_dtype)
 
         unet_weight_dtype = te_weight_dtype = weight_dtype
         # Experimental Feature: Put base model into fp8 to save vram
@@ -412,17 +439,18 @@ class NetworkTrainer:
                 t_enc.text_model.embeddings.to(dtype=(weight_dtype if te_weight_dtype != weight_dtype else te_weight_dtype))
 
         # acceleratorがなんかよろしくやってくれるらしい / accelerator will do something good
+        use_schedule_free_optimizer = args.optimizer_type.lower().endswith("schedulefree")
         if args.deepspeed:
             ds_model = deepspeed_utils.prepare_deepspeed_model(
                 args,
                 unet=unet if train_unet else None,
-                text_encoder1=text_encoders[0] if train_text_encoder else None,
-                text_encoder2=text_encoders[1] if train_text_encoder and len(text_encoders) > 1 else None,
+                text_encoder1=text_encoders[0] if train_text_encoder and train_text_encoder[0] else None,
+                text_encoder2=text_encoders[1] if train_text_encoder and len(text_encoders) > 1 and train_text_encoder[1] else None,
                 network=network,
             )
-            ds_model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-                ds_model, optimizer, train_dataloader, lr_scheduler
-            )
+            ds_model, optimizer, train_dataloader = accelerator.prepare(ds_model, optimizer, train_dataloader)
+            if not use_schedule_free_optimizer:
+                lr_scheduler = accelerator.prepare(lr_scheduler)
             training_model = ds_model
         else:
             if train_unet:
@@ -438,24 +466,37 @@ class NetworkTrainer:
             else:
                 pass  # if text_encoder is not trained, no need to prepare. and device and dtype are already set
 
-            network, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-                network, optimizer, train_dataloader, lr_scheduler
-            )
+            network, optimizer, train_dataloader = accelerator.prepare(network, optimizer, train_dataloader)
+            if not use_schedule_free_optimizer:
+                lr_scheduler = accelerator.prepare(lr_scheduler)
             training_model = network
+
+        # make lambda function for calling optimizer.train() and optimizer.eval() if schedule-free optimizer is used
+        if use_schedule_free_optimizer:
+            optimizer_train_if_needed = lambda: (optimizer.optimizer if hasattr(optimizer, "optimizer") else optimizer).train()
+            optimizer_eval_if_needed = lambda: (optimizer.optimizer if hasattr(optimizer, "optimizer") else optimizer).eval()
+        else:
+            optimizer_train_if_needed = lambda: None
+            optimizer_eval_if_needed = lambda: None
 
         if args.gradient_checkpointing:
             # according to TI example in Diffusers, train is required
             unet.train()
-            for t_enc in text_encoders:
+
+            for t_enc,t_te in zip(text_encoders,train_text_encoders):
+                if not t_te:
+                    continue
                 t_enc.train()
 
                 # set top parameter requires_grad = True for gradient checkpointing works
-                if train_text_encoder:
+                if t_te:
                     t_enc.text_model.embeddings.requires_grad_(True)
 
         else:
             unet.eval()
-            for t_enc in text_encoders:
+            for t_enc,t_te in zip(text_encoders,train_text_encoders):
+                if not t_te:
+                    continue
                 t_enc.eval()
 
         del t_enc
@@ -474,13 +515,15 @@ class NetworkTrainer:
         # before resuming make hook for saving/loading to save/load the network weights only
         def save_model_hook(models, weights, output_dir):
             # pop weights of other models than network to save only network weights
-            if accelerator.is_main_process:
+            # only main process or deepspeed https://github.com/huggingface/diffusers/issues/2606
+            if accelerator.is_main_process or args.deepspeed:
                 remove_indices = []
                 for i, model in enumerate(models):
                     if not isinstance(model, type(accelerator.unwrap_model(network))):
                         remove_indices.append(i)
                 for i in reversed(remove_indices):
-                    weights.pop(i)
+                    if len(weights) > i:
+                        weights.pop(i)
                 # print(f"save model hook: {len(weights)} weights will be saved")
 
             # save current ecpoch and step
@@ -546,6 +589,7 @@ class NetworkTrainer:
             "ss_output_name": args.output_name,
             "ss_learning_rate": args.learning_rate,
             "ss_text_encoder_lr": args.text_encoder_lr,
+            "ss_text_encoder_lr2": args.text_encoder_lr_2,
             "ss_unet_lr": args.unet_lr,
             "ss_num_train_images": train_dataset_group.num_train_images,
             "ss_num_reg_images": train_dataset_group.num_reg_images,
@@ -883,6 +927,7 @@ class NetworkTrainer:
                 initial_step = 0
 
             for step, batch in enumerate(active_dataloader):
+                optimizer_train_if_needed()
                 current_step.value = global_step
 
                 with accelerator.accumulate(training_model):
@@ -1000,6 +1045,8 @@ class NetworkTrainer:
                 else:
                     keys_scaled, mean_norm, maximum_norm = None, None, None
 
+                optimizer_eval_if_needed()
+
                 # Checks if the accelerator has performed an optimization step behind the scenes
                 if accelerator.sync_gradients:
                     progress_bar.update(1)
@@ -1026,14 +1073,15 @@ class NetworkTrainer:
                 loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
                 avr_loss: float = loss_recorder.moving_average
                 logs = {"avr_loss": avr_loss}  # , "lr": lr_scheduler.get_last_lr()[0]}
+
+                logs = self.generate_step_logs(args, current_loss, avr_loss, lr_scheduler, keys_scaled, mean_norm, maximum_norm)
+                if args.logging_dir is not None:                    
+                    accelerator.log(logs, step=global_step)
+
                 progress_bar.set_postfix(**logs)
 
                 if args.scale_weight_norms:
                     progress_bar.set_postfix(**{**max_mean_logs, **logs})
-
-                if args.logging_dir is not None:
-                    logs = self.generate_step_logs(args, current_loss, avr_loss, lr_scheduler, keys_scaled, mean_norm, maximum_norm)
-                    accelerator.log(logs, step=global_step)
 
                 if global_step >= args.max_train_steps:
                     break
@@ -1107,6 +1155,7 @@ def setup_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--unet_lr", type=float, default=None, help="learning rate for U-Net / U-Netの学習率")
     parser.add_argument("--text_encoder_lr", type=float, default=None, help="learning rate for Text Encoder / Text Encoderの学習率")
+    parser.add_argument("--text_encoder_lr_2", type=float, default=None, help="learning rate for Text Encoder 2 / Text Encoder2の学習率")
 
     parser.add_argument(
         "--network_weights", type=str, default=None, help="pretrained weights for network / 学習するネットワークの初期重み"

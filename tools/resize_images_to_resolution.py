@@ -1,5 +1,9 @@
-import glob
+import sys
 import os
+sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
+
+import glob
+
 import cv2
 import argparse
 import shutil

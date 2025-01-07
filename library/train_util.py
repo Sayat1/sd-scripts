@@ -11,6 +11,7 @@ import pathlib
 import re
 import shutil
 import time
+from collections.abc import Callable
 from typing import (
     Dict,
     List,
@@ -71,7 +72,7 @@ import library.model_util as model_util
 import library.huggingface_util as huggingface_util
 import library.sai_model_spec as sai_model_spec
 import library.deepspeed_utils as deepspeed_utils
-from library.utils import setup_logging
+from library.utils import setup_logging,colab_delete_file
 
 setup_logging()
 import logging
@@ -1496,7 +1497,7 @@ class DreamBoothDataset(BaseDataset):
         def load_dreambooth_dir(subset: DreamBoothSubset):
             if not os.path.isdir(subset.image_dir):
                 logger.warning(f"not directory: {subset.image_dir}")
-                return [], []
+                return [], [], []
 
             info_cache_file = os.path.join(subset.image_dir, self.IMAGE_INFO_CACHE_FILE)
             use_cached_info_for_subset = subset.cache_info
@@ -2234,11 +2235,17 @@ def debug_dataset(train_dataset, show_input_ids=False):
                         cond_img = cond_img[:, :, ::-1]
                         if os.name == "nt":
                             cv2.imshow("cond_img", cond_img)
-
+                    debug_folder = ""
                     if os.name == "nt":  # only windows
-                        cv2.imshow("img", im)
-                        k = cv2.waitKey()
-                        cv2.destroyAllWindows()
+                        # cv2.imshow("img", im)
+                        # k = cv2.waitKey()
+                        # cv2.destroyAllWindows()
+                        debug_folder = "./debug/"
+                    else:
+                        debug_folder = "/content/debug/"
+                    if not os.path.exists(debug_folder):
+                        os.mkdir(debug_folder)
+                    cv2.imwrite(f"{debug_folder}{epoch}_{steps}.jpg", im)
                     if k == 27 or k == ord("s") or k == ord("e"):
                         break
             steps += 1
@@ -2249,6 +2256,8 @@ def debug_dataset(train_dataset, show_input_ids=False):
                 k = 27
                 break
         if k == 27:
+            break
+        if epoch == 1:
             break
 
         epoch += 1
@@ -2382,7 +2391,8 @@ def trim_and_resize_if_required(
         trim_size = image_height - reso[1]
         p = trim_size // 2 if not random_crop else random.randint(0, trim_size)
         # logger.info(f"h {trim_size} {p})
-        image = image[p : p + reso[1]]
+        #중간을 자르지 않고 위에서부터 자름
+        image = image[: reso[1]]
 
     # random cropの場合のcropされた値をどうcrop left/topに反映するべきか全くアイデアがない
     # I have no idea how to reflect the cropped value in crop left/top in the case of random crop
@@ -2863,7 +2873,13 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
         "--optimizer_type",
         type=str,
         default="",
-        help="Optimizer to use / オプティマイザの種類: AdamW (default), AdamW8bit, PagedAdamW, PagedAdamW8bit, PagedAdamW32bit, Lion8bit, PagedLion8bit, Lion, SGDNesterov, SGDNesterov8bit, DAdaptation(DAdaptAdamPreprint), DAdaptAdaGrad, DAdaptAdam, DAdaptAdan, DAdaptAdanIP, DAdaptLion, DAdaptSGD, AdaFactor",
+        help="Optimizer to use / オプティマイザの種類: AdamW (default), AdamW8bit, PagedAdamW, PagedAdamW8bit, PagedAdamW32bit, Lion8bit, PagedLion8bit, Lion, SGD, SGD8bit, DAdaptation(DAdaptAdamPreprint), DAdaptAdaGrad, DAdaptAdam, DAdaptAdan, DAdaptAdanIP, DAdaptLion, DAdaptSGD, AdaFactor",
+    )
+
+    parser.add_argument(
+        "--use_mechanic",
+        action="store_true",
+        help="Mechanic aims to remove the need for tuning a learning rate scalar",
     )
 
     # backward compatibility
@@ -2935,6 +2951,10 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
     )
     parser.add_argument(
         "--output_name", type=str, default=None, help="base name of trained model file / 学習後のモデルの拡張子を除くファイル名"
+    )
+
+    parser.add_argument(
+        "--sample_dir", type=str, default=None, help="directory to output sampled images"
     )
     parser.add_argument(
         "--huggingface_repo_id",
@@ -3094,7 +3114,7 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
     )
     parser.add_argument("--seed", type=int, default=None, help="random seed for training / 学習時の乱数のseed")
     parser.add_argument(
-        "--gradient_checkpointing", action="store_true", help="enable gradient checkpointing / grandient checkpointingを有効にする"
+        "--gradient_checkpointing", action="store_true", help="enable gradient checkpointing / gradient checkpointingを有効にする"
     )
     parser.add_argument(
         "--gradient_accumulation_steps",
@@ -3408,6 +3428,7 @@ def verify_command_line_training_args(args: argparse.Namespace):
         "conditioning_data_dir",
         "reg_data_dir",
         "output_dir",
+        "sample_dir",
         "logging_dir",
     ]
 
@@ -3897,16 +3918,17 @@ def get_optimizer(args, trainable_params):
             optimizer_class = bnb.optim.AdamW8bit
             optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
-        elif optimizer_type == "SGDNesterov8bit".lower():
-            logger.info(f"use 8-bit SGD with Nesterov optimizer | {optimizer_kwargs}")
-            if "momentum" not in optimizer_kwargs:
-                logger.warning(
-                    f"8-bit SGD with Nesterov must be with momentum, set momentum to 0.9 / 8-bit SGD with Nesterovはmomentum指定が必須のため0.9に設定します"
-                )
-                optimizer_kwargs["momentum"] = 0.9
+        elif optimizer_type == "SGD8bit".lower():
+            logger.info(f"use 8-bit SGD optimizer | {optimizer_kwargs}")
+            # if "momentum" not in optimizer_kwargs:
+            #     logger.warning(
+            #         f"8-bit SGD with Nesterov must be with momentum, set momentum to 0.9 / 8-bit SGD with Nesterovはmomentum指定が必須のため0.9に設定します"
+            #     )
+            #     optimizer_kwargs["momentum"] = 0.9
 
             optimizer_class = bnb.optim.SGD8bit
-            optimizer = optimizer_class(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
+            optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+            
 
         elif optimizer_type == "Lion8bit".lower():
             logger.info(f"use 8-bit Lion optimizer | {optimizer_kwargs}")
@@ -3963,16 +3985,16 @@ def get_optimizer(args, trainable_params):
             )
         optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
-    elif optimizer_type == "SGDNesterov".lower():
-        logger.info(f"use SGD with Nesterov optimizer | {optimizer_kwargs}")
-        if "momentum" not in optimizer_kwargs:
-            logger.info(
-                f"SGD with Nesterov must be with momentum, set momentum to 0.9 / SGD with Nesterovはmomentum指定が必須のため0.9に設定します"
-            )
-            optimizer_kwargs["momentum"] = 0.9
+    elif optimizer_type == "SGD".lower():
+        logger.info(f"use SGD optimizer | {optimizer_kwargs}")
+        # if "momentum" not in optimizer_kwargs:
+        #     logger.info(
+        #         f"SGD with Nesterov must be with momentum, set momentum to 0.9 / SGD with Nesterovはmomentum指定が必須のため0.9に設定します"
+        #     )
+        #     optimizer_kwargs["momentum"] = 0.9
 
         optimizer_class = torch.optim.SGD
-        optimizer = optimizer_class(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
     elif optimizer_type.startswith("DAdapt".lower()) or optimizer_type == "Prodigy".lower():
         # check lr and lr_count, and logger.info warning
@@ -4095,6 +4117,21 @@ def get_optimizer(args, trainable_params):
         optimizer_class = torch.optim.AdamW
         optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
+    elif optimizer_type.endswith("schedulefree".lower()):
+        try:
+            import schedulefree as sf
+        except ImportError:
+            raise ImportError("No schedulefree / schedulefreeがインストールされていないようです")
+        if optimizer_type == "AdamWScheduleFree".lower():
+            optimizer_class = sf.AdamWScheduleFree
+            logger.info(f"use AdamWScheduleFree optimizer | {optimizer_kwargs}")
+        elif optimizer_type == "SGDScheduleFree".lower():
+            optimizer_class = sf.SGDScheduleFree
+            logger.info(f"use SGDScheduleFree optimizer | {optimizer_kwargs}")
+        else:
+            raise ValueError(f"Unknown optimizer type: {optimizer_type}")
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+
     if optimizer is None:
         # 任意のoptimizerを使う
         optimizer_type = args.optimizer_type  # lowerでないやつ（微妙）
@@ -4109,8 +4146,18 @@ def get_optimizer(args, trainable_params):
         optimizer_class = getattr(optimizer_module, optimizer_type)
         optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
 
+    if args.use_mechanic:
+        from mechanic_pytorch import mechanize
+        print("use mechanize")
+        optimizer = mechanize(optimizer_class,s_decay=optimizer_kwargs.get("weight_decay",0.01))(trainable_params, lr=lr, **optimizer_kwargs)
+
     optimizer_name = optimizer_class.__module__ + "." + optimizer_class.__name__
     optimizer_args = ",".join([f"{k}={v}" for k, v in optimizer_kwargs.items()])
+
+    arguments = vars(optimizer).get("defaults",None)
+    logger.info(f"final optimizer args | {arguments}")
+    print(f"final optimizer args | {arguments}")
+    del arguments
 
     return optimizer_name, optimizer_args, optimizer
 
@@ -4118,11 +4165,33 @@ def get_optimizer(args, trainable_params):
 # Modified version of get_scheduler() function from diffusers.optimizer.get_scheduler
 # Add some checking and features to the original function.
 
+def lr_lambda_warmup(warmup_steps: int, lr_lambda: Callable[[int], float]):
+    def warmup(current_step: int):
+        if current_step < warmup_steps:
+            return float(current_step) / float(warmup_steps)
+        else:
+            return lr_lambda(current_step - warmup_steps)
+
+    return warmup
+
+def lr_lambda_constant():
+    def lr_lambda(current_step: int):
+        return 1
+
+    return lr_lambda
 
 def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
     """
     Unified API to get any scheduler from its name.
     """
+    # supports schedule free optimizer
+    if args.optimizer_type.lower().endswith("schedulefree"):
+        # return dummy scheduler: it has 'step' method but does nothing
+        logger.info("use dummy scheduler for schedule free optimizer / schedule free optimizer用のダミースケジューラを使用します")
+        lr_scheduler = TYPE_TO_SCHEDULER_FUNCTION[SchedulerType.CONSTANT](optimizer)
+        lr_scheduler.step = lambda: None
+        return lr_scheduler
+
     name = args.lr_scheduler
     num_warmup_steps: Optional[int] = args.lr_warmup_steps
     num_training_steps = args.max_train_steps * num_processes  # * args.gradient_accumulation_steps
@@ -4133,7 +4202,10 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
     if args.lr_scheduler_args is not None and len(args.lr_scheduler_args) > 0:
         for arg in args.lr_scheduler_args:
             key, value = arg.split("=")
-            value = ast.literal_eval(value)
+            if value=="%TRAIN_STEPS%":
+                value = num_training_steps-num_warmup_steps
+            else:
+                value = ast.literal_eval(value)
             lr_scheduler_kwargs[key] = value
 
     def wrap_check_needless_num_warmup_steps(return_vals):
@@ -4143,6 +4215,7 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
 
     # using any lr_scheduler from other library
     if args.lr_scheduler_type:
+        from torch.optim.lr_scheduler import LambdaLR,SequentialLR
         lr_scheduler_type = args.lr_scheduler_type
         logger.info(f"use {lr_scheduler_type} | {lr_scheduler_kwargs} as lr_scheduler")
         if "." not in lr_scheduler_type:  # default to use torch.optim
@@ -4153,7 +4226,19 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
             lr_scheduler_type = values[-1]
         lr_scheduler_class = getattr(lr_scheduler_module, lr_scheduler_type)
         lr_scheduler = lr_scheduler_class(optimizer, **lr_scheduler_kwargs)
-        return wrap_check_needless_num_warmup_steps(lr_scheduler)
+        if num_warmup_steps > 0:
+            warmup_scheduler = LambdaLR(
+                optimizer=optimizer,
+                lr_lambda=lr_lambda_warmup(num_warmup_steps, lr_lambda_constant()),
+                last_epoch=lr_scheduler_kwargs.get("last_epoch",-1)
+            )
+            lr_scheduler = SequentialLR(
+                optimizer,
+                schedulers=[warmup_scheduler, lr_scheduler],
+                milestones=[num_warmup_steps],
+                last_epoch=lr_scheduler_kwargs.get("last_epoch",-1)
+            )
+        return lr_scheduler
 
     if name.startswith("adafactor"):
         assert (
@@ -4257,7 +4342,7 @@ def load_tokenizer(args: argparse.Namespace):
     return tokenizer
 
 
-def prepare_accelerator(args: argparse.Namespace):
+def prepare_accelerator(args: argparse.Namespace) -> Accelerator:
     """
     this function also prepares deepspeed plugin
     """
@@ -4762,10 +4847,15 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
 
     last_n_epochs = args.save_last_n_epochs_state if args.save_last_n_epochs_state else args.save_last_n_epochs
     if last_n_epochs is not None:
+        from pathlib import Path
         remove_epoch_no = epoch_no - args.save_every_n_epochs * last_n_epochs
         state_dir_old = os.path.join(args.output_dir, EPOCH_STATE_NAME.format(model_name, remove_epoch_no))
         if os.path.exists(state_dir_old):
             logger.info(f"removing old state: {state_dir_old}")
+            sub_files = Path(state_dir_old).rglob("*.*")
+            for sub_file in sub_files:
+                if not sub_file.is_dir():
+                    colab_delete_file(sub_file)
             shutil.rmtree(state_dir_old)
 
 
@@ -4784,6 +4874,7 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
 
     last_n_steps = args.save_last_n_steps_state if args.save_last_n_steps_state else args.save_last_n_steps
     if last_n_steps is not None:
+        from pathlib import Path
         # last_n_steps前のstep_noから、save_every_n_stepsの倍数のstep_noを計算して削除する
         remove_step_no = step_no - last_n_steps - 1
         remove_step_no = remove_step_no - (remove_step_no % args.save_every_n_steps)
@@ -4792,6 +4883,10 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
             state_dir_old = os.path.join(args.output_dir, STEP_STATE_NAME.format(model_name, remove_step_no))
             if os.path.exists(state_dir_old):
                 logger.info(f"removing old state: {state_dir_old}")
+                sub_files = Path(state_dir_old).rglob("*.*")
+                for sub_file in sub_files:
+                    if not sub_file.is_dir():
+                        colab_delete_file(sub_file)
                 shutil.rmtree(state_dir_old)
 
 
@@ -4962,18 +5057,21 @@ def conditional_loss(
     return loss
 
 
-def append_lr_to_logs(logs, lr_scheduler, optimizer_type, including_unet=True):
+def append_lr_to_logs(logs, lr_scheduler, optimizer_type, including_unet=True, use_mechanic=False):
     names = []
     if including_unet:
         names.append("unet")
     names.append("text_encoder1")
     names.append("text_encoder2")
 
-    append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names)
+    append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names, use_mechanic)
 
 
-def append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names):
+def append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names, use_mechanic):
     lrs = lr_scheduler.get_last_lr()
+    if use_mechanic:
+        s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
+        s_sum = torch.sum(s).item()
 
     for lr_index in range(len(lrs)):
         name = names[lr_index]
@@ -4982,6 +5080,10 @@ def append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names):
         if optimizer_type.lower().startswith("DAdapt".lower()) or optimizer_type.lower() == "Prodigy".lower():
             logs["lr/d*lr/" + name] = (
                 lr_scheduler.optimizers[-1].param_groups[lr_index]["d"] * lr_scheduler.optimizers[-1].param_groups[lr_index]["lr"]
+            )
+        if use_mechanic:
+            logs["lr/s*lr/" + name] = (
+                s_sum * lr_scheduler.optimizers[-1].param_groups[lr_index]["lr"]
             )
 
 
@@ -5183,7 +5285,10 @@ def sample_images_common(
         clip_skip=args.clip_skip,
     )
     pipeline.to(distributed_state.device)
-    save_dir = args.output_dir + "/sample"
+    if args.sample_dir:
+        save_dir = args.sample_dir
+    else:
+        save_dir = args.output_dir + "/sample"
     os.makedirs(save_dir, exist_ok=True)
 
     # preprocess prompts
