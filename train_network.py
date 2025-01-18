@@ -356,7 +356,7 @@ class NetworkTrainer:
         text_encoder_lrs = [tlr for tlr in text_encoder_lrs if tlr!=0]
         # 後方互換性を確保するよ
         try:
-            results = network.prepare_optimizer_params(args.text_encoder_lr, args.unet_lr, args.learning_rate)
+            results = network.prepare_optimizer_params(text_encoder_lrs, args.unet_lr, args.learning_rate)
             if type(results) is tuple:
                 trainable_params = results[0]
                 lr_descriptions = results[1]
@@ -368,7 +368,7 @@ class NetworkTrainer:
             # accelerator.print(
             #     "Deprecated: use prepare_optimizer_params(text_encoder_lr, unet_lr, learning_rate) instead of prepare_optimizer_params(text_encoder_lr, unet_lr)"
             # )
-            trainable_params = network.prepare_optimizer_params(args.text_encoder_lr, args.unet_lr)
+            trainable_params = network.prepare_optimizer_params(text_encoder_lrs, args.unet_lr)
             lr_descriptions = None
 
         # if len(trainable_params) == 0:
