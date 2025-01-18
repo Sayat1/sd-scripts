@@ -101,6 +101,7 @@ class NetworkTrainer:
             if args.use_mechanic:
                 logs[f"lr/s*lr/group{i}"] = (
                     s_sum * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
+                )
 
         return logs
 
