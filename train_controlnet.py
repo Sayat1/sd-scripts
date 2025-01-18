@@ -5,7 +5,8 @@ import os
 import random
 import time
 from multiprocessing import Value
-from types import SimpleNamespace
+
+# from omegaconf import OmegaConf
 import toml
 
 from tqdm import tqdm
@@ -106,6 +107,8 @@ def train(args):
     ds_for_collator = train_dataset_group if args.max_data_loader_n_workers == 0 else None
     collator = train_util.collator_class(current_epoch, current_step, ds_for_collator)
 
+    train_dataset_group.verify_bucket_reso_steps(64)
+
     if args.debug_dataset:
         train_util.debug_dataset(train_dataset_group)
         return
@@ -149,8 +152,10 @@ def train(args):
             "in_channels": 4,
             "layers_per_block": 2,
             "mid_block_scale_factor": 1,
+            "mid_block_type": "UNetMidBlock2DCrossAttn",
             "norm_eps": 1e-05,
             "norm_num_groups": 32,
+            "num_attention_heads": [5, 10, 20, 20],
             "num_class_embeds": None,
             "only_cross_attention": False,
             "out_channels": 4,
@@ -180,8 +185,10 @@ def train(args):
             "in_channels": 4,
             "layers_per_block": 2,
             "mid_block_scale_factor": 1,
+            "mid_block_type": "UNetMidBlock2DCrossAttn",
             "norm_eps": 1e-05,
             "norm_num_groups": 32,
+            "num_attention_heads": 8,
             "out_channels": 4,
             "sample_size": 64,
             "up_block_types": ["UpBlock2D", "CrossAttnUpBlock2D", "CrossAttnUpBlock2D", "CrossAttnUpBlock2D"],
@@ -194,7 +201,23 @@ def train(args):
             "resnet_time_scale_shift": "default",
             "projection_class_embeddings_input_dim": None,
         }
-    unet.config = SimpleNamespace(**unet.config)
+    # unet.config = OmegaConf.create(unet.config)
+
+    # make unet.config iterable and accessible by attribute
+    class CustomConfig:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+        def __getattr__(self, name):
+            if name in self.__dict__:
+                return self.__dict__[name]
+            else:
+                raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+
+        def __contains__(self, name):
+            return name in self.__dict__
+
+    unet.config = CustomConfig(**unet.config)
 
     controlnet = ControlNetModel.from_unet(unet)
 
@@ -236,7 +259,7 @@ def train(args):
     # 学習に必要なクラスを準備する
     accelerator.print("prepare optimizer, data loader etc.")
 
-    trainable_params = controlnet.parameters()
+    trainable_params = list(controlnet.parameters())
 
     _, _, optimizer = train_util.get_optimizer(args, trainable_params)
 
@@ -354,7 +377,9 @@ def train(args):
         if args.log_tracker_config is not None:
             init_kwargs = toml.load(args.log_tracker_config)
         accelerator.init_trackers(
-            "controlnet_train" if args.log_tracker_name is None else args.log_tracker_name, init_kwargs=init_kwargs
+            "controlnet_train" if args.log_tracker_name is None else args.log_tracker_name,
+            config=train_util.get_sanitized_config_or_none(args),
+            init_kwargs=init_kwargs,
         )
 
     loss_recorder = train_util.LossRecorder()

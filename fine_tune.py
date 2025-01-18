@@ -91,6 +91,8 @@ def train(args):
     ds_for_collator = train_dataset_group if args.max_data_loader_n_workers == 0 else None
     collator = train_util.collator_class(current_epoch, current_step, ds_for_collator)
 
+    train_dataset_group.verify_bucket_reso_steps(64)
+
     if args.debug_dataset:
         train_util.debug_dataset(train_dataset_group)
         return
@@ -319,7 +321,11 @@ def train(args):
             init_kwargs["wandb"] = {"name": args.wandb_run_name}
         if args.log_tracker_config is not None:
             init_kwargs = toml.load(args.log_tracker_config)
-        accelerator.init_trackers("finetuning" if args.log_tracker_name is None else args.log_tracker_name, init_kwargs=init_kwargs)
+        accelerator.init_trackers(
+            "finetuning" if args.log_tracker_name is None else args.log_tracker_name,
+            config=train_util.get_sanitized_config_or_none(args),
+            init_kwargs=init_kwargs,
+        )
 
     # For --sample_at_first
     train_util.sample_images(accelerator, args, 0, global_step, accelerator.device, vae, tokenizer, text_encoder, unet)
@@ -390,7 +396,7 @@ def train(args):
                     if args.scale_v_pred_loss_like_noise_pred:
                         loss = scale_v_prediction_loss_like_noise_prediction(loss, timesteps, noise_scheduler)
                     if args.debiased_estimation_loss:
-                        loss = apply_debiased_estimation(loss, timesteps, noise_scheduler)
+                        loss = apply_debiased_estimation(loss, timesteps, noise_scheduler, args.v_parameterization)
 
                     loss = loss.mean()  # mean over batch dimension
                 else:
