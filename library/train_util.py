@@ -2379,6 +2379,10 @@ def debug_dataset(train_dataset, show_input_ids=False):
                     if not os.path.exists(debug_folder):
                         os.mkdir(debug_folder)
                     cv2.imwrite(f"{debug_folder}{epoch}_{steps}.jpg", im)
+                    if "conditioning_images" in example:
+                        cv2.imwrite(f"{debug_folder}{epoch}_{steps}_condition.jpg", cond_img)
+                    if "alpha_masks" in example and example["alpha_masks"] is not None:
+                        cv2.imwrite(f"{debug_folder}{epoch}_{steps}_alpha.jpg", alpha_mask)
                     if k == 27 or k == ord("s") or k == ord("e"):
                         break
             steps += 1
