@@ -857,9 +857,11 @@ class NetworkTrainer:
 
         global_step = 0
 
-        noise_scheduler = DDPMScheduler(
-            beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000, clip_sample=False
-        )
+        # noise_scheduler = DDPMScheduler(
+        #     beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000, clip_sample=False
+        # )
+        noise_scheduler = train_util.create_train_scheduler(args.train_scheduler) #커스텀 트레인 스케쥴러
+        print(noise_scheduler) #for debugging
         prepare_scheduler_for_custom_training(noise_scheduler, accelerator.device)
         if args.zero_terminal_snr:
             custom_train_functions.fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler)

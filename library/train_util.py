@@ -52,6 +52,7 @@ from diffusers import (
     StableDiffusionPipeline,
     DDPMScheduler,
     EulerAncestralDiscreteScheduler,
+    EDMEulerScheduler,
     DPMSolverMultistepScheduler,
     DPMSolverSinglestepScheduler,
     LMSDiscreteScheduler,
@@ -3416,6 +3417,34 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
     parser.add_argument("--log_config", action="store_true", help="log training configuration / 学習設定をログに出力する")
 
     parser.add_argument(
+        "--train_scheduler",
+        type=str,
+        default="ddpm",
+        choices=[
+            "ddpm",
+            "ddim",
+            "pndm",
+            "lms",
+            "edmeuler",
+            "euler",
+            "euler_a",
+            "heun",
+            "dpm_2",
+            "dpm_2_a",
+            "dpmsolver",
+            "dpmsolver++",
+            "sde-dpmsolver++",
+            "dpmsingle",
+            "k_lms",
+            "k_euler",
+            "k_euler_a",
+            "k_dpm_2",
+            "k_dpm_2_a",
+        ],
+        help=f"train noise scheduler type for training",
+    )
+
+    parser.add_argument(
         "--noise_offset",
         type=float,
         default=None,
@@ -5408,6 +5437,59 @@ def append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names, use_
             logs["lr/s*lr/" + name] = (
                 s_sum * lr_scheduler.optimizers[-1].param_groups[lr_index]["lr"]
             )
+
+def create_train_scheduler(train_scheduler: str):
+    num_train_timesteps=1000
+    sched_init_args = {}
+    if train_scheduler == "ddim":
+        scheduler_cls = DDIMScheduler
+    elif train_scheduler == "ddpm":
+        scheduler_cls = DDPMScheduler
+    elif train_scheduler == "pndm":
+        scheduler_cls = PNDMScheduler
+    elif train_scheduler == "lms" or train_scheduler == "k_lms":
+        scheduler_cls = LMSDiscreteScheduler
+    elif train_scheduler == "euler" or train_scheduler == "k_euler":
+        scheduler_cls = EulerDiscreteScheduler
+    elif train_scheduler == "euler_a" or train_scheduler == "k_euler_a":
+        scheduler_cls = EulerAncestralDiscreteScheduler
+    elif train_scheduler == "edmeuler":
+        scheduler_cls = EDMEulerScheduler
+    elif train_scheduler == "dpmsolver" or train_scheduler == "dpmsolver++" or train_scheduler == "sde-dpmsolver++":
+        scheduler_cls = DPMSolverMultistepScheduler
+        sched_init_args["algorithm_type"] = train_scheduler
+    elif train_scheduler == "dpmsingle":
+        scheduler_cls = DPMSolverSinglestepScheduler
+    elif train_scheduler == "heun":
+        scheduler_cls = HeunDiscreteScheduler
+    elif train_scheduler == "dpm_2" or train_scheduler == "k_dpm_2":
+        scheduler_cls = KDPM2DiscreteScheduler
+    elif train_scheduler == "dpm_2_a" or train_scheduler == "k_dpm_2_a":
+        scheduler_cls = KDPM2AncestralDiscreteScheduler
+    else:
+        scheduler_cls = DDPMScheduler
+
+    scheduler = scheduler_cls(
+        num_train_timesteps=num_train_timesteps,
+        **sched_init_args,
+    )
+
+    if hasattr(scheduler.config, "beta_start"):
+        scheduler.config.beta_start = 0.00085
+
+    if hasattr(scheduler.config, "beta_end"):
+        scheduler.config.beta_end = 0.012
+
+    if hasattr(scheduler.config, "clip_sample"):
+        scheduler.config.clip_sample = False
+
+    if hasattr(scheduler.config, "beta_schedule"):
+        scheduler.config.beta_schedule = "scaled_linear"
+
+    if hasattr(scheduler.config, "prediction_type"):
+        scheduler.config.prediction_type = "epsilon"
+
+    return scheduler
 
 
 # scheduler:
