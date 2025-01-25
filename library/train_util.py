@@ -28,6 +28,7 @@ import os
 import random
 import hashlib
 import subprocess
+import inspect
 from io import BytesIO
 import toml
 
@@ -5332,6 +5333,7 @@ def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler,
             alpha = -math.log(args.huber_c) / noise_scheduler.config.num_train_timesteps
             huber_c = torch.exp(-alpha * timesteps)
         elif args.huber_schedule == "snr":
+            timesteps = timesteps.to(noise_scheduler.alphas_cumprod.device)
             alphas_cumprod = torch.index_select(noise_scheduler.alphas_cumprod, 0, timesteps)
             sigmas = ((1.0 - alphas_cumprod) / alphas_cumprod) ** 0.5
             huber_c = (1 - args.huber_c) / (1 + sigmas) ** 2 + args.huber_c
@@ -5469,25 +5471,28 @@ def create_train_scheduler(train_scheduler: str):
     else:
         scheduler_cls = DDPMScheduler
 
+    init_keys = list(inspect.signature(scheduler_cls).parameters)
+    print(init_keys)
+
+    if "beta_start" in init_keys:
+        sched_init_args["beta_start"] = 0.00085
+
+    if "beta_end" in init_keys:
+        sched_init_args["beta_end"] = 0.012
+
+    if "clip_sample" in init_keys:
+        sched_init_args["clip_sample"] = False
+
+    if "beta_schedule" in init_keys:
+        sched_init_args["beta_schedule"] = "scaled_linear"
+
+    if "prediction_type" in init_keys:
+        sched_init_args["prediction_type"] = "epsilon"
+
     scheduler = scheduler_cls(
         num_train_timesteps=num_train_timesteps,
         **sched_init_args,
     )
-
-    if hasattr(scheduler.config, "beta_start"):
-        scheduler.config.beta_start = 0.00085
-
-    if hasattr(scheduler.config, "beta_end"):
-        scheduler.config.beta_end = 0.012
-
-    if hasattr(scheduler.config, "clip_sample"):
-        scheduler.config.clip_sample = False
-
-    if hasattr(scheduler.config, "beta_schedule"):
-        scheduler.config.beta_schedule = "scaled_linear"
-
-    if hasattr(scheduler.config, "prediction_type"):
-        scheduler.config.prediction_type = "epsilon"
 
     return scheduler
 
