@@ -5472,7 +5472,6 @@ def create_train_scheduler(train_scheduler: str):
         scheduler_cls = DDPMScheduler
 
     init_keys = list(inspect.signature(scheduler_cls).parameters)
-    print(init_keys)
 
     if "beta_start" in init_keys:
         sched_init_args["beta_start"] = 0.00085
