@@ -862,7 +862,11 @@ class NetworkTrainer:
         # )
         noise_scheduler = train_util.create_train_scheduler(args.train_scheduler) #커스텀 트레인 스케쥴러
         print(noise_scheduler) #for debugging
-        prepare_scheduler_for_custom_training(noise_scheduler, accelerator.device)
+        if hasattr(noise_scheduler,'alphas_cumprod'):
+            prepare_scheduler_for_custom_training(noise_scheduler, accelerator.device)
+        else:
+            print("this noise sccheduler doesn't support huber. Force change it to l2")
+            args.loss_type = "l2"
         if args.zero_terminal_snr:
             custom_train_functions.fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler)
 
@@ -994,7 +998,6 @@ class NetworkTrainer:
                     noise, noisy_latents, timesteps, huber_c = train_util.get_noise_noisy_latents_and_timesteps(
                         args, noise_scheduler, latents
                     )
-
                     # ensure the hidden state will require grad
                     if args.gradient_checkpointing:
                         for x in noisy_latents:

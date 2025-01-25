@@ -53,6 +53,7 @@ from diffusers import (
     StableDiffusionPipeline,
     DDPMScheduler,
     EulerAncestralDiscreteScheduler,
+    FlowMatchEulerDiscreteScheduler,
     EDMEulerScheduler,
     DPMSolverMultistepScheduler,
     DPMSolverSinglestepScheduler,
@@ -3427,6 +3428,7 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
             "pndm",
             "lms",
             "edmeuler",
+            "flow_euler",
             "euler",
             "euler_a",
             "heun",
@@ -5366,7 +5368,10 @@ def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
         )
 
     # Sample a random timestep for each image
-    b_size = latents.shape[0]
+    if args.loss_type == "l2":
+        b_size = None
+    else:
+        b_size = latents.shape[0]
     min_timestep = 0 if args.min_timestep is None else args.min_timestep
     max_timestep = noise_scheduler.config.num_train_timesteps if args.max_timestep is None else args.max_timestep
 
@@ -5455,6 +5460,8 @@ def create_train_scheduler(train_scheduler: str):
         scheduler_cls = EulerDiscreteScheduler
     elif train_scheduler == "euler_a" or train_scheduler == "k_euler_a":
         scheduler_cls = EulerAncestralDiscreteScheduler
+    elif train_scheduler == "flow_euler":
+        scheduler_cls = FlowMatchEulerDiscreteScheduler
     elif train_scheduler == "edmeuler":
         scheduler_cls = EDMEulerScheduler
     elif train_scheduler == "dpmsolver" or train_scheduler == "dpmsolver++" or train_scheduler == "sde-dpmsolver++":
