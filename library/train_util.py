@@ -5368,14 +5368,16 @@ def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
         )
 
     # Sample a random timestep for each image
-    if args.loss_type == "l2":
-        b_size = None
-    else:
-        b_size = latents.shape[0]
+    b_size = latents.shape[0]
     min_timestep = 0 if args.min_timestep is None else args.min_timestep
     max_timestep = noise_scheduler.config.num_train_timesteps if args.max_timestep is None else args.max_timestep
 
-    timesteps, huber_c = get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, latents.device)
+    if 'edm' in args.train_scheduler or 'flow' in args.train_scheduler:
+        indices = torch.randint(min_timestep, max_timestep, (b_size,), device="cpu")
+        timesteps = noise_scheduler.timesteps[indices].to(device=latents.device)
+        huber_c = None
+    else:
+        timesteps, huber_c = get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, latents.device)
 
     # Add noise to the latents according to the noise magnitude at each timestep
     # (this is the forward diffusion process)
