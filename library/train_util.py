@@ -5492,6 +5492,9 @@ def create_train_scheduler(train_scheduler: str):
     if "prediction_type" in init_keys:
         sched_init_args["prediction_type"] = "epsilon"
 
+    if "timestep_spacing" in init_keys:
+        sched_init_args["timestep_spacing"] = "leading"
+
     scheduler = scheduler_cls(
         num_train_timesteps=num_train_timesteps,
         **sched_init_args,
