@@ -3440,11 +3440,6 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
             "dpmsolver++",
             "sde-dpmsolver++",
             "dpmsingle",
-            "k_lms",
-            "k_euler",
-            "k_euler_a",
-            "k_dpm_2",
-            "k_dpm_2_a",
             "deis",
             "dpmsde"
         ],
@@ -5530,11 +5525,11 @@ def get_my_scheduler(
         scheduler_cls = DDPMScheduler
     elif sample_sampler == "pndm":
         scheduler_cls = PNDMScheduler
-    elif sample_sampler == "lms" or sample_sampler == "k_lms":
+    elif sample_sampler == "lms":
         scheduler_cls = LMSDiscreteScheduler
-    elif sample_sampler == "euler" or sample_sampler == "k_euler":
+    elif sample_sampler == "euler":
         scheduler_cls = EulerDiscreteScheduler
-    elif sample_sampler == "euler_a" or sample_sampler == "k_euler_a":
+    elif sample_sampler == "euler_a":
         scheduler_cls = EulerAncestralDiscreteScheduler
     elif sample_sampler == "dpmsolver" or sample_sampler == "dpmsolver++":
         scheduler_cls = DPMSolverMultistepScheduler
@@ -5543,9 +5538,9 @@ def get_my_scheduler(
         scheduler_cls = DPMSolverSinglestepScheduler
     elif sample_sampler == "heun":
         scheduler_cls = HeunDiscreteScheduler
-    elif sample_sampler == "dpm_2" or sample_sampler == "k_dpm_2":
+    elif sample_sampler == "dpm_2":
         scheduler_cls = KDPM2DiscreteScheduler
-    elif sample_sampler == "dpm_2_a" or sample_sampler == "k_dpm_2_a":
+    elif sample_sampler == "dpm_2_a":
         scheduler_cls = KDPM2AncestralDiscreteScheduler
     else:
         scheduler_cls = DDIMScheduler
