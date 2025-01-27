@@ -5450,11 +5450,11 @@ def create_train_scheduler(train_scheduler: str):
         scheduler_cls = DDPMScheduler
     elif train_scheduler == "pndm":
         scheduler_cls = PNDMScheduler
-    elif train_scheduler == "lms" or train_scheduler == "k_lms":
+    elif train_scheduler == "lms":
         scheduler_cls = LMSDiscreteScheduler
-    elif train_scheduler == "euler" or train_scheduler == "k_euler":
+    elif train_scheduler == "euler":
         scheduler_cls = EulerDiscreteScheduler
-    elif train_scheduler == "euler_a" or train_scheduler == "k_euler_a":
+    elif train_scheduler == "euler_a":
         scheduler_cls = EulerAncestralDiscreteScheduler
     elif train_scheduler == "flow_euler":
         scheduler_cls = FlowMatchEulerDiscreteScheduler
@@ -5467,9 +5467,9 @@ def create_train_scheduler(train_scheduler: str):
         scheduler_cls = DPMSolverSinglestepScheduler
     elif train_scheduler == "heun":
         scheduler_cls = HeunDiscreteScheduler
-    elif train_scheduler == "dpm_2" or train_scheduler == "k_dpm_2":
+    elif train_scheduler == "dpm_2":
         scheduler_cls = KDPM2DiscreteScheduler
-    elif train_scheduler == "dpm_2_a" or train_scheduler == "k_dpm_2_a":
+    elif train_scheduler == "dpm_2_a":
         scheduler_cls = KDPM2AncestralDiscreteScheduler
     elif train_scheduler == "deis":
         scheduler_cls = DEISMultistepScheduler
@@ -5525,11 +5525,11 @@ def get_my_scheduler(
         scheduler_cls = DDPMScheduler
     elif sample_sampler == "pndm":
         scheduler_cls = PNDMScheduler
-    elif sample_sampler == "lms":
+    elif sample_sampler == "lms" or sample_sampler == "k_lms":
         scheduler_cls = LMSDiscreteScheduler
-    elif sample_sampler == "euler":
+    elif sample_sampler == "euler" or sample_sampler == "k_euler":
         scheduler_cls = EulerDiscreteScheduler
-    elif sample_sampler == "euler_a":
+    elif sample_sampler == "euler_a" or sample_sampler == "k_euler_a":
         scheduler_cls = EulerAncestralDiscreteScheduler
     elif sample_sampler == "dpmsolver" or sample_sampler == "dpmsolver++":
         scheduler_cls = DPMSolverMultistepScheduler
@@ -5538,9 +5538,9 @@ def get_my_scheduler(
         scheduler_cls = DPMSolverSinglestepScheduler
     elif sample_sampler == "heun":
         scheduler_cls = HeunDiscreteScheduler
-    elif sample_sampler == "dpm_2":
+    elif sample_sampler == "dpm_2" or sample_sampler == "k_dpm_2":
         scheduler_cls = KDPM2DiscreteScheduler
-    elif sample_sampler == "dpm_2_a":
+    elif sample_sampler == "dpm_2_a" or sample_sampler == "k_dpm_2_a":
         scheduler_cls = KDPM2AncestralDiscreteScheduler
     else:
         scheduler_cls = DDIMScheduler
