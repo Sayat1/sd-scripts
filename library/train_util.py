@@ -64,6 +64,8 @@ from diffusers import (
     HeunDiscreteScheduler,
     KDPM2DiscreteScheduler,
     KDPM2AncestralDiscreteScheduler,
+    DEISMultistepScheduler,
+    DPMSolverSDEScheduler,
     AutoencoderKL,
 )
 from library import custom_train_functions
@@ -5472,6 +5474,10 @@ def create_train_scheduler(train_scheduler: str):
         scheduler_cls = KDPM2DiscreteScheduler
     elif train_scheduler == "dpm_2_a" or train_scheduler == "k_dpm_2_a":
         scheduler_cls = KDPM2AncestralDiscreteScheduler
+    elif train_scheduler == "deis":
+        scheduler_cls = DEISMultistepScheduler
+    elif train_scheduler == "dpmsde":
+        scheduler_cls = DPMSolverSDEScheduler
     else:
         scheduler_cls = DDPMScheduler
 
