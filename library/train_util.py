@@ -3445,6 +3445,8 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
             "k_euler_a",
             "k_dpm_2",
             "k_dpm_2_a",
+            "deis",
+            "dpmsde"
         ],
         help=f"train noise scheduler type for training",
     )
