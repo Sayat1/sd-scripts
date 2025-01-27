@@ -645,8 +645,6 @@ class NetworkTrainer:
             "ss_loss_type": args.loss_type,
             "ss_huber_schedule": args.huber_schedule,
             "ss_huber_c": args.huber_c,
-            "ss_min_timestep": 0 if args.min_timestep is None else args.min_timestep,
-            "ss_max_timestep": noise_scheduler.config.num_train_timesteps if args.max_timestep is None else args.max_timestep,
             "ss_train_noise_scheduler": args.train_scheduler,
         }
 
