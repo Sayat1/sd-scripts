@@ -5457,8 +5457,10 @@ def create_train_scheduler(args):
     if args.train_scheduler_args is not None and len(args.train_scheduler_args) > 0:
         for arg in args.train_scheduler_args:
             key, value = arg.split("=")
-            if type(value) is not str:
+            try:
                 value = ast.literal_eval(value)
+            except ValueError:
+                pass
 
             sched_init_args[key] = value
 
