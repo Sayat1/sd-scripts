@@ -3447,6 +3447,14 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
     )
 
     parser.add_argument(
+        "--train_scheduler_args",
+        type=str,
+        default=None,
+        nargs="*",
+        help='additional arguments for train_scheduler',
+    )
+
+    parser.add_argument(
         "--noise_offset",
         type=float,
         default=None,
@@ -5441,9 +5449,18 @@ def append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names, use_
                 s_sum * lr_scheduler.optimizers[-1].param_groups[lr_index]["lr"]
             )
 
-def create_train_scheduler(train_scheduler: str):
+def create_train_scheduler(args):
     num_train_timesteps=1000
+    train_scheduler = args.train_scheduler
     sched_init_args = {}
+    
+    if args.train_scheduler_args is not None and len(args.train_scheduler_args) > 0:
+        for arg in args.train_scheduler_args:
+            key, value = arg.split("=")
+            value = ast.literal_eval(value)
+
+            sched_init_args[key] = value
+
     if train_scheduler == "ddim":
         scheduler_cls = DDIMScheduler
     elif train_scheduler == "ddpm":
@@ -5480,22 +5497,22 @@ def create_train_scheduler(train_scheduler: str):
 
     init_keys = list(inspect.signature(scheduler_cls).parameters)
 
-    if "beta_start" in init_keys:
+    if "beta_start" in init_keys and not "beta_start" in sched_init_args:
         sched_init_args["beta_start"] = 0.00085
 
-    if "beta_end" in init_keys:
+    if "beta_end" in init_keys and not "beta_end" in sched_init_args:
         sched_init_args["beta_end"] = 0.012
 
-    if "clip_sample" in init_keys:
+    if "clip_sample" in init_keys and not "clip_sample" in sched_init_args:
         sched_init_args["clip_sample"] = False
 
-    if "beta_schedule" in init_keys:
+    if "beta_schedule" in init_keys and not "beta_schedule" in sched_init_args:
         sched_init_args["beta_schedule"] = "scaled_linear"
 
-    if "prediction_type" in init_keys:
+    if "prediction_type" in init_keys and not "prediction_type" in sched_init_args:
         sched_init_args["prediction_type"] = "epsilon"
 
-    if "timestep_spacing" in init_keys:
+    if "timestep_spacing" in init_keys and not "timestep_spacing" in sched_init_args:
         sched_init_args["timestep_spacing"] = "leading"
 
     scheduler = scheduler_cls(

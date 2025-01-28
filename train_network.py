@@ -861,7 +861,7 @@ class NetworkTrainer:
         # noise_scheduler = DDPMScheduler(
         #     beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000, clip_sample=False
         # )
-        noise_scheduler = train_util.create_train_scheduler(args.train_scheduler) #커스텀 트레인 스케쥴러
+        noise_scheduler = train_util.create_train_scheduler(args) #커스텀 트레인 스케쥴러
         print(noise_scheduler) #for debugging
         if hasattr(noise_scheduler,'alphas_cumprod'):
             prepare_scheduler_for_custom_training(noise_scheduler, accelerator.device)
