@@ -647,7 +647,8 @@ class NetworkTrainer:
             "ss_huber_c": args.huber_c,
             "ss_train_noise_scheduler": args.train_scheduler,
             "ss_timestep_sampling" : args.timestep_sampling,
-            "ss_sigmoid_scale" : args.sigmoid_scale
+            "ss_sigmoid_scale" : args.sigmoid_scale,
+            "ss_sigmoid_bias" : args.sigmoid_bias
         }
 
         if use_user_config:

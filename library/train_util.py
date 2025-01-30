@@ -3469,6 +3469,13 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
     )
 
     parser.add_argument(
+        "--sigmoid_bias",
+        type=float,
+        default=0.0,
+        help='mean of timesteps for sigmoid timestep sampling (only used when timestep-sampling is "sigmoid").',
+    )
+
+    parser.add_argument(
         "--noise_offset",
         type=float,
         default=None,
@@ -5350,12 +5357,12 @@ def save_sd_model_on_train_end_common(
 def get_timesteps(args, min_timestep, max_timestep, b_size):
     num_timestep = max_timestep - min_timestep
     if args.timestep_sampling == "sigmoid":
-        # https://github.com/XLabs-AI/x-flux/tree/main
-        t = torch.sigmoid(args.sigmoid_scale * torch.randn((b_size,), device="cpu"))
+        normal = torch.normal(args.sigmoid_bias, args.sigmoid_scale, (b_size,), device="cpu")
+        t = normal.sigmoid()
     else:
         t = torch.rand((b_size,), device="cpu")
 
-    timesteps = (t * num_timestep).long()
+    timesteps = (t * num_timestep + min_timestep).long()
     return timesteps
 
 def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device):
