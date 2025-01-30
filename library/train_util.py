@@ -3455,6 +3455,20 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
     )
 
     parser.add_argument(
+        "--timestep_sampling",
+        choices=["uniform", "sigmoid"],
+        default="uniform",
+        help="Method to sample timesteps: uniform random, sigmoid of random normal",
+    )
+    
+    parser.add_argument(
+        "--sigmoid_scale",
+        type=float,
+        default=1.0,
+        help='Scale factor for sigmoid timestep sampling (only used when timestep-sampling is "sigmoid"). / sigmoidタイムステップサンプリングの倍率（timestep-samplingが"sigmoid"の場合のみ有効）。',
+    )
+
+    parser.add_argument(
         "--noise_offset",
         type=float,
         default=None,
@@ -5333,9 +5347,19 @@ def save_sd_model_on_train_end_common(
         if args.huggingface_repo_id is not None:
             huggingface_util.upload(args, out_dir, "/" + model_name, force_sync_upload=True)
 
+def get_timesteps(args, min_timestep, max_timestep, b_size):
+    num_timestep = max_timestep - min_timestep
+    if args.timestep_sampling == "sigmoid":
+        # https://github.com/XLabs-AI/x-flux/tree/main
+        t = torch.sigmoid(args.sigmoid_scale * torch.randn((b_size,), device="cpu"))
+    else:
+        t = torch.rand((b_size,), device="cpu")
+
+    timesteps = (t * num_timestep).long()
+    return timesteps
 
 def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device):
-    timesteps = torch.randint(min_timestep, max_timestep, (b_size,), device="cpu")
+    timesteps = get_timesteps(args, min_timestep, max_timestep, b_size)
 
     if args.loss_type == "huber" or args.loss_type == "smooth_l1":
         if args.huber_schedule == "exponential":
@@ -5356,7 +5380,7 @@ def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler,
     else:
         raise NotImplementedError(f"Unknown loss type {args.loss_type}")
 
-    timesteps = timesteps.long().to(device)
+    timesteps = timesteps.to(device)
     return timesteps, huber_c
 
 
