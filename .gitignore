@@ -7,3 +7,4 @@ build
 .vscode
 wandb
 *.toml
+timestep_viewer.py
