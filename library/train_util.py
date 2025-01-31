@@ -3456,7 +3456,7 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
 
     parser.add_argument(
         "--timestep_sampling",
-        choices=["uniform", "sigmoid"],
+        choices=["uniform", "sigmoid","increase","normal"],
         default="uniform",
         help="Method to sample timesteps: uniform random, sigmoid of random normal",
     )
@@ -5354,11 +5354,31 @@ def save_sd_model_on_train_end_common(
         if args.huggingface_repo_id is not None:
             huggingface_util.upload(args, out_dir, "/" + model_name, force_sync_upload=True)
 
+increase_step = 0
+total_timesteps=[]
 def get_timesteps(args, min_timestep, max_timestep, b_size):
     num_timestep = max_timestep - min_timestep
     if args.timestep_sampling == "sigmoid":
         normal = torch.normal(args.sigmoid_bias, args.sigmoid_scale, (b_size,), device="cpu")
         t = normal.sigmoid()
+    elif args.timestep_sampling == "increase":
+        global increase_step
+        timesteps=[]
+        for i in range(b_size):
+            timesteps.append(increase_step)
+            increase_step = increase_step + 1
+            if increase_step == max_timestep:
+                increase_step = min_timestep
+        return torch.tensor(timesteps, device="cpu")
+    elif args.timestep_sampling == "normal":
+        global total_timesteps
+        timesteps=[]
+        for i in range(b_size):
+            if len(total_timesteps)==0:
+                total_timesteps = [s for s in range(min_timestep,max_timestep)]
+                random.shuffle(total_timesteps)
+            timesteps.append(total_timesteps.pop())
+        return torch.tensor(timesteps, device="cpu")
     else:
         t = torch.rand((b_size,), device="cpu")
 
