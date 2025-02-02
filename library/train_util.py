@@ -3465,7 +3465,7 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         "--weighting_scheme",
         type=str,
         default="sigma_sqrt",
-        choices=["sigma_sqrt", "cosmap", "none", "uniform"],
+        choices=["sigma_sqrt", "cosmap", "one", "none"],
         help="weighting scheme for timestep distribution. Default is sigma_sqrt",
     )
 
