@@ -1012,9 +1012,10 @@ class NetworkTrainer:
                     )
 
                     if edm_training:
-                        sigmas = train_util.get_sigmas(timesteps, noise_scheduler, len(noisy_latents.shape), noisy_latents.dtype, accelerator.device)
-                        if 'flow' in args.train_scheduler: #이걸 바로넣어야하나 아니면 정제하게 둬야하나?
+                        sigmas = train_util.get_sigmas(timesteps, noise_scheduler, latents.ndim, weight_dtype, accelerator.device)
+                        if 'flow' in args.train_scheduler: 
                             noisy_latents = sigmas * noise + (1.0 - sigmas) * latents
+                            inp_noisy_latents = noisy_latents
                         if 'edm' in args.train_scheduler:
                             inp_noisy_latents = noise_scheduler.precondition_inputs(noisy_latents, sigmas)
                         else:
@@ -1051,12 +1052,16 @@ class NetworkTrainer:
                         if 'edm' in args.train_scheduler:
                             noise_pred = noise_scheduler.precondition_outputs(noisy_latents, noise_pred, sigmas)
                         else:
-                            if noise_scheduler.config.prediction_type == "epsilon":
+                            #FLOW EULER는 prediction type이 없음
+                            if hasattr(noise_scheduler.config, "prediction_type"):
+                                if noise_scheduler.config.prediction_type == "epsilon":
+                                    noise_pred = noise_pred * (-sigmas) + noisy_latents
+                                elif noise_scheduler.config.prediction_type == "v_prediction":
+                                    noise_pred = noise_pred * (-sigmas / (sigmas**2 + 1) ** 0.5) + (
+                                        noisy_latents / (sigmas**2 + 1)
+                                    )
+                            else:
                                 noise_pred = noise_pred * (-sigmas) + noisy_latents
-                            elif noise_scheduler.config.prediction_type == "v_prediction":
-                                noise_pred = noise_pred * (-sigmas / (sigmas**2 + 1) ** 0.5) + (
-                                    noisy_latents / (sigmas**2 + 1)
-                                )
                         # We are not doing weighting here because it tends result in numerical problems.
                         # See: https://github.com/huggingface/diffusers/pull/7126#issuecomment-1968523051
                         # There might be other alternatives for weighting as well:
@@ -1070,18 +1075,11 @@ class NetworkTrainer:
                     else:
                         target = latents if edm_training else noise
 
+                    loss = train_util.conditional_loss(
+                        noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c
+                    )
                     if weighting is not None:
-                        loss = torch.mean(
-                            (weighting.float() * (noise_pred.float() - target.float()) ** 2).reshape(
-                                target.shape[0], -1
-                            ),
-                            1,
-                        )
-                        loss = loss.mean()
-                    else:
-                        loss = train_util.conditional_loss(
-                            noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c
-                        )
+                        loss = loss * weighting
                     if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
                         loss = apply_masked_loss(loss, batch)
                     loss = loss.mean([1, 2, 3])
