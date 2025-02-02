@@ -861,11 +861,18 @@ class NetworkTrainer:
                 initial_step = 0  # do not skip
 
         global_step = 0
-
+        edm_training = False
         # noise_scheduler = DDPMScheduler(
         #     beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000, clip_sample=False
         # )
         noise_scheduler = train_util.create_train_scheduler(args) #커스텀 트레인 스케쥴러
+        if 'euler' in args.train_scheduler:
+            edm_training = True
+            print("edm training")
+
+        if edm_training and args.min_snr_gamma is not None:
+            raise ValueError("Min-SNR formulation is not supported when conducting EDM-style training.")
+        
         print(noise_scheduler) #for debugging
         if hasattr(noise_scheduler,'alphas_cumprod'):
             prepare_scheduler_for_custom_training(noise_scheduler, accelerator.device)
@@ -1003,12 +1010,25 @@ class NetworkTrainer:
                     noise, noisy_latents, timesteps, huber_c = train_util.get_noise_noisy_latents_and_timesteps(
                         args, noise_scheduler, latents
                     )
+
+                    if edm_training:
+                        sigmas = train_util.get_sigmas(timesteps, noise_scheduler, len(noisy_latents.shape), noisy_latents.dtype, accelerator.device)
+                        if 'flow' in args.train_scheduler: #이걸 바로넣어야하나 아니면 정제하게 둬야하나?
+                            noisy_latents = sigmas * noise + (1.0 - sigmas) * latents
+                        if 'edm' in args.train_scheduler:
+                            inp_noisy_latents = noise_scheduler.precondition_inputs(noisy_latents, sigmas)
+                        else:
+                            inp_noisy_latents = noisy_latents / ((sigmas**2 + 1) ** 0.5)
+
                     # ensure the hidden state will require grad
                     if args.gradient_checkpointing:
                         for x in noisy_latents:
                             x.requires_grad_(True)
                         for t in text_encoder_conds:
                             t.requires_grad_(True)
+                        if edm_training:
+                            for x in inp_noisy_latents:
+                                x.requires_grad_(True)
 
                     # Predict the noise residual
                     with accelerator.autocast():
@@ -1016,22 +1036,52 @@ class NetworkTrainer:
                             args,
                             accelerator,
                             unet,
-                            noisy_latents.requires_grad_(train_unet),
+                            inp_noisy_latents.requires_grad_(train_unet) if edm_training else noisy_latents.requires_grad_(train_unet),
                             timesteps,
                             text_encoder_conds,
                             batch,
                             weight_dtype,
                         )
 
+                    weighting = None
+                    if edm_training:
+                        # Similar to the input preconditioning, the model predictions are also preconditioned
+                        # on noised model inputs (before preconditioning) and the sigmas.
+                        # Follow: Section 5 of https://arxiv.org/abs/2206.00364.
+                        if 'edm' in args.train_scheduler:
+                            noise_pred = noise_scheduler.precondition_outputs(noisy_latents, noise_pred, sigmas)
+                        else:
+                            if noise_scheduler.config.prediction_type == "epsilon":
+                                noise_pred = noise_pred * (-sigmas) + noisy_latents
+                            elif noise_scheduler.config.prediction_type == "v_prediction":
+                                noise_pred = noise_pred * (-sigmas / (sigmas**2 + 1) ** 0.5) + (
+                                    noisy_latents / (sigmas**2 + 1)
+                                )
+                        # We are not doing weighting here because it tends result in numerical problems.
+                        # See: https://github.com/huggingface/diffusers/pull/7126#issuecomment-1968523051
+                        # There might be other alternatives for weighting as well:
+                        # https://github.com/huggingface/diffusers/pull/7126#discussion_r1505404686
+                        if 'edm' not in args.train_scheduler:
+                            weighting = (sigmas**-2.0).float()
+
                     if args.v_parameterization:
                         # v-parameterization training
-                        target = noise_scheduler.get_velocity(latents, noise, timesteps)
+                        target = latents if edm_training else noise_scheduler.get_velocity(latents, noise, timesteps)
                     else:
-                        target = noise
+                        target = latents if edm_training else noise
 
-                    loss = train_util.conditional_loss(
-                        noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c
-                    )
+                    if weighting is not None:
+                        loss = torch.mean(
+                            (weighting.float() * (noise_pred.float() - target.float()) ** 2).reshape(
+                                target.shape[0], -1
+                            ),
+                            1,
+                        )
+                        loss = loss.mean()
+                    else:
+                        loss = train_util.conditional_loss(
+                            noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c
+                        )
                     if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
                         loss = apply_masked_loss(loss, batch)
                     loss = loss.mean([1, 2, 3])
