@@ -3456,11 +3456,19 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
 
     parser.add_argument(
         "--timestep_sampling",
-        choices=["uniform", "sigmoid","increase","normal"],
+        choices=["uniform", "sigmoid","increase","decrease","normal"],
         default="uniform",
         help="Method to sample timesteps: uniform random, sigmoid of random normal",
     )
     
+    parser.add_argument(
+        "--weighting_scheme",
+        type=str,
+        default="sigma_sqrt",
+        choices=["sigma_sqrt", "cosmap", "none", "uniform"],
+        help="weighting scheme for timestep distribution. Default is sigma_sqrt",
+    )
+
     parser.add_argument(
         "--sigmoid_scale",
         type=float,
@@ -5366,21 +5374,29 @@ def get_sigmas(timesteps, noise_scheduler, n_dim=4, dtype=torch.float32, device=
         sigma = sigma.unsqueeze(-1)
     return sigma
 
-increase_step = 0
+sequential_step = 0
 total_timesteps=[]
 def get_timesteps(args, min_timestep, max_timestep, b_size):
+    global sequential_step
     num_timestep = max_timestep - min_timestep
     if args.timestep_sampling == "sigmoid":
         normal = torch.normal(args.sigmoid_bias, args.sigmoid_scale, (b_size,), device="cpu")
         t = normal.sigmoid()
     elif args.timestep_sampling == "increase":
-        global increase_step
         timesteps=[]
         for i in range(b_size):
-            timesteps.append(increase_step)
-            increase_step = increase_step + 1
-            if increase_step == max_timestep:
-                increase_step = min_timestep
+            timesteps.append(sequential_step)
+            sequential_step = sequential_step + 1
+            if sequential_step == max_timestep:
+                sequential_step = min_timestep
+        return torch.tensor(timesteps, device="cpu")
+    elif args.timestep_sampling == "decrease":
+        timesteps=[]
+        for i in range(b_size):
+            sequential_step = sequential_step - 1
+            if sequential_step < min_timestep:
+                sequential_step = max_timestep-1
+            timesteps.append(sequential_step)
         return torch.tensor(timesteps, device="cpu")
     elif args.timestep_sampling == "normal":
         global total_timesteps
@@ -5399,6 +5415,7 @@ def get_timesteps(args, min_timestep, max_timestep, b_size):
 
 def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device):
     timesteps = get_timesteps(args, min_timestep, max_timestep, b_size)
+
     if 'euler' in args.train_scheduler:
         timesteps = noise_scheduler.timesteps[timesteps].to(device="cpu")
 
@@ -5485,6 +5502,22 @@ def conditional_loss(
     else:
         raise NotImplementedError(f"Unsupported Loss Type {loss_type}")
     return loss
+
+def compute_loss_weighting(weighting_scheme: str, sigmas=None):
+    """Computes loss weighting scheme for SD3 training.
+
+    Courtesy: This was contributed by Rafie Walker in https://github.com/huggingface/diffusers/pull/8528.
+
+    SD3 paper reference: https://arxiv.org/abs/2403.03206v1.
+    """
+    if weighting_scheme == "sigma_sqrt":
+        weighting = (sigmas**-2.0).float()
+    elif weighting_scheme == "cosmap":
+        bot = 1 - 2 * sigmas + 2 * sigmas**2
+        weighting = 2 / (math.pi * bot)
+    else:
+        weighting = torch.ones_like(sigmas)
+    return weighting
 
 
 def append_lr_to_logs(logs, lr_scheduler, optimizer_type, including_unet=True, use_mechanic=False):

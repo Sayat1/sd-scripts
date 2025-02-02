@@ -1046,28 +1046,31 @@ class NetworkTrainer:
 
                     weighting = None
                     if edm_training:
-                        # Similar to the input preconditioning, the model predictions are also preconditioned
-                        # on noised model inputs (before preconditioning) and the sigmas.
-                        # Follow: Section 5 of https://arxiv.org/abs/2206.00364.
-                        if 'edm' in args.train_scheduler:
-                            noise_pred = noise_scheduler.precondition_outputs(noisy_latents, noise_pred, sigmas)
+                        if args.weighting_scheme == "none":
+                            pass
                         else:
-                            #FLOW EULER는 prediction type이 없음
-                            if hasattr(noise_scheduler.config, "prediction_type"):
-                                if noise_scheduler.config.prediction_type == "epsilon":
-                                    noise_pred = noise_pred * (-sigmas) + noisy_latents
-                                elif noise_scheduler.config.prediction_type == "v_prediction":
-                                    noise_pred = noise_pred * (-sigmas / (sigmas**2 + 1) ** 0.5) + (
-                                        noisy_latents / (sigmas**2 + 1)
-                                    )
+                            # Similar to the input preconditioning, the model predictions are also preconditioned
+                            # on noised model inputs (before preconditioning) and the sigmas.
+                            # Follow: Section 5 of https://arxiv.org/abs/2206.00364.
+                            if 'edm' in args.train_scheduler:
+                                noise_pred = noise_scheduler.precondition_outputs(noisy_latents, noise_pred, sigmas)
                             else:
-                                noise_pred = noise_pred * (-sigmas) + noisy_latents
-                        # We are not doing weighting here because it tends result in numerical problems.
-                        # See: https://github.com/huggingface/diffusers/pull/7126#issuecomment-1968523051
-                        # There might be other alternatives for weighting as well:
-                        # https://github.com/huggingface/diffusers/pull/7126#discussion_r1505404686
-                        if 'edm' not in args.train_scheduler:
-                            weighting = (sigmas**-2.0).float()
+                                #FLOW EULER는 prediction type이 없음
+                                if hasattr(noise_scheduler.config, "prediction_type"):
+                                    if noise_scheduler.config.prediction_type == "epsilon":
+                                        noise_pred = noise_pred * (-sigmas) + noisy_latents
+                                    elif noise_scheduler.config.prediction_type == "v_prediction":
+                                        noise_pred = noise_pred * (-sigmas / (sigmas**2 + 1) ** 0.5) + (
+                                            noisy_latents / (sigmas**2 + 1)
+                                        )
+                                else:
+                                    noise_pred = noise_pred * (-sigmas) + noisy_latents
+                            # We are not doing weighting here because it tends result in numerical problems.
+                            # See: https://github.com/huggingface/diffusers/pull/7126#issuecomment-1968523051
+                            # There might be other alternatives for weighting as well:
+                            # https://github.com/huggingface/diffusers/pull/7126#discussion_r1505404686
+                            if 'edm' not in args.train_scheduler:
+                                weighting = train_util.compute_loss_weighting(args.weighting_scheme, sigmas)
 
                     if args.v_parameterization:
                         # v-parameterization training
