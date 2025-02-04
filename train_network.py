@@ -879,10 +879,14 @@ class NetworkTrainer:
         if hasattr(noise_scheduler,'alphas_cumprod'):
             prepare_scheduler_for_custom_training(noise_scheduler, accelerator.device)
         else:
-            print("this noise sccheduler doesn't support huber. Force change it to l2")
+            print("this noise scheduler doesn't support huber. Force change it to l2")
             args.loss_type = "l2"
         if args.zero_terminal_snr:
             custom_train_functions.fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler)
+
+        flow_timesteps = None
+        if args.use_flow_timesteps:
+            flow_timesteps = train_util.create_flow_timesteps(args.timestep_shift)
 
         if accelerator.is_main_process:
             init_kwargs = {}
@@ -1010,7 +1014,7 @@ class NetworkTrainer:
                     # Sample noise, sample a random timestep for each image, and add noise to the latents,
                     # with noise offset and/or multires noise if specified
                     noise, noisy_latents, timesteps, huber_c = train_util.get_noise_noisy_latents_and_timesteps(
-                        args, noise_scheduler, latents
+                        args, noise_scheduler, latents, flow_timesteps
                     )
 
                     if edm_training:

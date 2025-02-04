@@ -3484,6 +3484,12 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
     )
 
     parser.add_argument(
+        "--use_flow_timesteps",
+        action="store_true",
+        help="use flow euler scheduler's timesteps and shifting instead of original noise scheduler's",
+    )
+
+    parser.add_argument(
         "--timestep_shift",
         type=float,
         default=1.0,
@@ -5369,13 +5375,20 @@ def save_sd_model_on_train_end_common(
         if args.huggingface_repo_id is not None:
             huggingface_util.upload(args, out_dir, "/" + model_name, force_sync_upload=True)
 
+def create_flow_timesteps(shift=1, num_timestep=1000):
+    timesteps = np.linspace(1, num_timestep, num_timestep, dtype=np.float32)[::-1].copy()
+    timesteps = torch.from_numpy(timesteps).to(dtype=torch.float32, device="cpu")
+    sigmas = timesteps / num_timestep
+    sigmas = shift * sigmas / (1 + (shift - 1) * sigmas)
+    #flow timestep은 1~1000에 소수를 포함해서, 이렇게 처리함
+    flow_timesteps = (sigmas * num_timestep - 1.0).long()
+    return flow_timesteps
+
 def get_sigmas(timesteps, noise_scheduler, n_dim=4, dtype=torch.float32, device="cpu"):
     sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
     schedule_timesteps = noise_scheduler.timesteps.to(device)
     timesteps = timesteps.to(device)
-
     step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
-
     sigma = sigmas[step_indices].flatten()
     while len(sigma.shape) < n_dim:
         sigma = sigma.unsqueeze(-1)
@@ -5417,15 +5430,18 @@ def get_timesteps(args, min_timestep, max_timestep, b_size):
     else:
         t = torch.rand((b_size,), device="cpu")
 
-    t = (t * args.timestep_shift) / (1 + (args.timestep_shift - 1) * t)
+    if not args.use_flow_timesteps:
+        t = (t * args.timestep_shift) / (1 + (args.timestep_shift - 1) * t)
     indices = (t * (max_timestep - min_timestep) + min_timestep).long()
     timesteps = indices.to(device="cpu")
     return timesteps
 
-def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device):
+def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device, flow_timesteps=None):
     timesteps = get_timesteps(args, min_timestep, max_timestep, b_size)
 
-    if 'euler' in args.train_scheduler:
+    if args.use_flow_timesteps and flow_timesteps != None:
+        timesteps = flow_timesteps[timesteps].to(device="cpu")
+    elif 'euler' in args.train_scheduler:
         timesteps = noise_scheduler.timesteps[timesteps].to(device="cpu")
 
     if args.loss_type == "huber" or args.loss_type == "smooth_l1":
@@ -5451,7 +5467,7 @@ def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler,
     return timesteps, huber_c
 
 
-def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
+def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents, flow_timesteps=None):
     # Sample noise that we'll add to the latents
     noise = torch.randn_like(latents, device=latents.device)
     if args.noise_offset:
@@ -5470,7 +5486,7 @@ def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
     min_timestep = 0 if args.min_timestep is None else args.min_timestep
     max_timestep = noise_scheduler.config.num_train_timesteps if args.max_timestep is None else args.max_timestep
 
-    timesteps, huber_c = get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, latents.device)
+    timesteps, huber_c = get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, latents.device, flow_timesteps)
 
     noisy_latents = None
     if 'flow' not in args.train_scheduler:
