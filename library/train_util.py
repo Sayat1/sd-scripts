@@ -3484,6 +3484,13 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
     )
 
     parser.add_argument(
+        "--timestep_shift",
+        type=float,
+        default=1.0,
+        help='shifting timestep by this value. must 0 or more. value >1 will shift distribution to noisy side (focus more on overall structure), value <1 will shift towards less-noisy side (focus more on details)',
+    )
+
+    parser.add_argument(
         "--noise_offset",
         type=float,
         default=None,
@@ -5410,7 +5417,9 @@ def get_timesteps(args, min_timestep, max_timestep, b_size):
     else:
         t = torch.rand((b_size,), device="cpu")
 
-    timesteps = (t * num_timestep + min_timestep).long()
+    t = (t * args.timestep_shift) / (1 + (args.timestep_shift - 1) * t)
+    indices = (t * (max_timestep - min_timestep) + min_timestep).long()
+    timesteps = indices.to(device="cpu")
     return timesteps
 
 def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device):
