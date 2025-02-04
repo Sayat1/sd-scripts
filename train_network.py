@@ -649,7 +649,9 @@ class NetworkTrainer:
             "ss_train_noise_scheduler": args.train_scheduler,
             "ss_timestep_sampling" : args.timestep_sampling,
             "ss_sigmoid_scale" : args.sigmoid_scale,
-            "ss_sigmoid_bias" : args.sigmoid_bias
+            "ss_sigmoid_bias" : args.sigmoid_bias,
+            "ss_weighting_scheme" : args.weighting_scheme,
+            "ss_timestep_shift" : args.timestep_shift,
         }
 
         if use_user_config:
