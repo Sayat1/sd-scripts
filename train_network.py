@@ -886,6 +886,7 @@ class NetworkTrainer:
 
         flow_timesteps = None
         if args.use_flow_timesteps:
+            print("use FlowMatchEulerDiscreteScheduler's timestep")
             flow_timesteps = train_util.create_flow_timesteps(args.timestep_shift)
 
         if accelerator.is_main_process:
