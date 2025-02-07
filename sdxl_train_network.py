@@ -158,10 +158,13 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
 
         # concat embeddings
         encoder_hidden_states1, encoder_hidden_states2, pool2 = text_conds
-        vector_embedding = torch.cat([pool2, embs], dim=1).to(weight_dtype)
+        #vector_embedding = torch.cat([pool2, embs], dim=1).to(weight_dtype)
+        pool2 = pool2.to(weight_dtype)
+        embs = embs.to(weight_dtype)
+        added_cond_kwargs = {"text_embeds": pool2, "time_ids": embs}
         text_embedding = torch.cat([encoder_hidden_states1, encoder_hidden_states2], dim=2).to(weight_dtype)
 
-        noise_pred = unet(noisy_latents, timesteps, text_embedding, vector_embedding)
+        noise_pred = unet(noisy_latents, timesteps, encoder_hidden_states=text_embedding, added_cond_kwargs=added_cond_kwargs)
         return noise_pred
 
     def sample_images(self, accelerator, args, epoch, global_step, device, vae, tokenizer, text_encoder, unet):
