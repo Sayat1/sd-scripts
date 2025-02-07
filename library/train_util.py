@@ -5022,7 +5022,7 @@ def get_hidden_states_sdxl(
 
     # text_encoder1
     enc_out = text_encoder1(input_ids1, output_hidden_states=True, return_dict=True)
-    hidden_states1 = enc_out["hidden_states"][11]
+    hidden_states1 = enc_out["hidden_states"][-2]
 
     # text_encoder2
     enc_out = text_encoder2(input_ids2, output_hidden_states=True, return_dict=True)
