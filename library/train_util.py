@@ -2309,7 +2309,7 @@ def debug_dataset(train_dataset, show_input_ids=False):
     logger.info(
         "`S` for next step, `E` for next epoch no. , Escape for exit. / Sキーで次のステップ、Eキーで次のエポック、Escキーで中断、終了します"
     )
-
+    show_input_ids=True
     epoch = 1
     while True:
         logger.info(f"")
