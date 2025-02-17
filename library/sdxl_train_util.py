@@ -153,10 +153,10 @@ def _load_target_model(
         logit_scale = None
         ckpt_info = None
 
-    # # VAEを読み込む
-    # if vae_path is not None:
-    #     vae = model_util.load_vae(vae_path, weight_dtype)
-    #     logger.info("additional VAE loaded")
+    # VAEを読み込む
+    if vae_path is not None:
+        vae = model_util.load_vae(vae_path, weight_dtype)
+        logger.info("additional VAE loaded")
 
     return load_stable_diffusion_format, text_encoder1, text_encoder2, vae, unet, logit_scale, ckpt_info
 
