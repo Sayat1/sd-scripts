@@ -1164,12 +1164,6 @@ class NetworkTrainer:
                 if args.scale_weight_norms:
                     progress_bar.set_postfix(**{**max_mean_logs, **logs})
 
-                if args.logging_dir is not None:
-                    logs = self.generate_step_logs(
-                        args, current_loss, avr_loss, lr_scheduler, lr_descriptions, keys_scaled, mean_norm, maximum_norm
-                    )
-                    accelerator.log(logs, step=global_step)
-
                 if global_step >= args.max_train_steps:
                     break
 
