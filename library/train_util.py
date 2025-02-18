@@ -2340,16 +2340,14 @@ def debug_dataset(train_dataset, show_input_ids=False):
                     example["flippeds"],
                 )
             ):
-                logger.info(
-                    f'{ik}, size: {train_dataset.image_data[ik].image_size}, loss weight: {lw}, caption: "{cap}", original size: {orgsz}, crop top left: {crptl}, target size: {trgsz}, flipped: {flpdz}'
-                )
+                infotext=f'{ik}, size: {train_dataset.image_data[ik].image_size}, loss weight: {lw}, caption: "{cap}", original size: {orgsz}, crop top left: {crptl}, target size: {trgsz}, flipped: {flpdz}'
                 if "network_multipliers" in example:
                     print(f"network multiplier: {example['network_multipliers'][j]}")
 
                 if show_input_ids:
-                    logger.info(f"input ids: {iid}")
+                    infotext += f"input ids: {iid}"
                     if "input_ids2" in example:
-                        logger.info(f"input ids2: {example['input_ids2'][j]}")
+                        infotext += f"input ids2: {example['input_ids2'][j]}"
                 if example["images"] is not None:
                     im = example["images"][j]
                     logger.info(f"image size: {im.size()}")
@@ -2384,6 +2382,8 @@ def debug_dataset(train_dataset, show_input_ids=False):
                     if not os.path.exists(debug_folder):
                         os.mkdir(debug_folder)
                     cv2.imwrite(f"{debug_folder}{epoch}_{steps}.jpg", im)
+                    with open(f"{debug_folder}{epoch}_{steps}.txt",mode='w') as f:
+                        f.write(infotext)
                     if "conditioning_images" in example:
                         cv2.imwrite(f"{debug_folder}{epoch}_{steps}_condition.jpg", cond_img)
                     if "alpha_masks" in example and example["alpha_masks"] is not None:
