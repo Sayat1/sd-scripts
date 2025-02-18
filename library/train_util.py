@@ -2345,9 +2345,9 @@ def debug_dataset(train_dataset, show_input_ids=False):
                     print(f"network multiplier: {example['network_multipliers'][j]}")
 
                 if show_input_ids:
-                    infotext += f"input ids: {iid}"
+                    infotext += f" input ids: {iid}"
                     if "input_ids2" in example:
-                        infotext += f"input ids2: {example['input_ids2'][j]}"
+                        infotext += f" input ids2: {example['input_ids2'][j]}"
                 if example["images"] is not None:
                     im = example["images"][j]
                     logger.info(f"image size: {im.size()}")
