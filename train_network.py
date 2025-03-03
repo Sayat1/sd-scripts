@@ -879,7 +879,7 @@ class NetworkTrainer:
         if hasattr(noise_scheduler,'alphas_cumprod'):
             prepare_scheduler_for_custom_training(noise_scheduler, accelerator.device)
         else:
-            print("this noise scheduler doesn't support huber. Force change it to l2")
+            print("this noise scheduler doesn't support huber. Forcely change it to l2")
             args.loss_type = "l2"
         if args.zero_terminal_snr:
             custom_train_functions.fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler)
