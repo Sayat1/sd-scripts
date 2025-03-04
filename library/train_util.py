@@ -5441,9 +5441,9 @@ def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler,
 
     if args.use_flow_timesteps and flow_timesteps != None:
         timesteps = flow_timesteps[timesteps].to(device="cpu")
-    elif 'euler' in args.train_scheduler:
-        indices = 999-timesteps #샘플러에서 참조하는 타임스탭은 반대이므로.
-        timesteps = noise_scheduler.timesteps[indices].long().to(device="cpu")
+    # elif 'euler' in args.train_scheduler:
+    #     indices = 999-timesteps #샘플러에서 참조하는 타임스탭은 반대이므로.
+    #     timesteps = noise_scheduler.timesteps[indices].long().to(device="cpu")
 
     if args.loss_type == "huber" or args.loss_type == "smooth_l1":
         if args.huber_schedule == "exponential":
