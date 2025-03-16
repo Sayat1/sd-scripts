@@ -4571,7 +4571,10 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
             if value=="%TRAIN_STEPS%":
                 value = num_training_steps-num_warmup_steps
             else:
-                value = ast.literal_eval(value)
+                try:
+                    value = ast.literal_eval(value)
+                except ValueError:
+                    value = value
             lr_scheduler_kwargs[key] = value
 
     def wrap_check_needless_num_warmup_steps(return_vals):
