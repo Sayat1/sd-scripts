@@ -4575,6 +4575,9 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
                     value = ast.literal_eval(value)
                 except ValueError:
                     value = value
+            if key == "min_lr_rate":
+                min_lr_ratio = value
+                continue
             lr_scheduler_kwargs[key] = value
 
     def wrap_check_needless_num_warmup_steps(return_vals):
