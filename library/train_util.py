@@ -4575,8 +4575,17 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
                     value = ast.literal_eval(value)
                 except ValueError:
                     value = value
-            if key == "min_lr_rate":
+            if key == "min_lr_ratio":
                 min_lr_ratio = value
+                continue
+            elif key == "num_cycles":
+                num_cycles = value
+                continue
+            elif key == "power":
+                power = value
+                continue
+            elif key == "timescale":
+                timescale = value
                 continue
             lr_scheduler_kwargs[key] = value
 
