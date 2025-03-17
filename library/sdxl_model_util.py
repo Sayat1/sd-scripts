@@ -207,6 +207,9 @@ def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dty
     info = _load_state_dict_on_device(unet, unet_sd, device=map_location, dtype=dtype)
     logger.info(f"U-Net: {info}")
 
+    #lowram을 '안'쓰기 위한 방도. 
+    unet = unet.to(device="cuda")
+    
     # Text Encoders
     logger.info("building text encoders")
 

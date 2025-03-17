@@ -28,6 +28,7 @@ import os
 import random
 import hashlib
 import subprocess
+import inspect
 from io import BytesIO
 import toml
 
@@ -52,6 +53,8 @@ from diffusers import (
     StableDiffusionPipeline,
     DDPMScheduler,
     EulerAncestralDiscreteScheduler,
+    FlowMatchEulerDiscreteScheduler,
+    EDMEulerScheduler,
     DPMSolverMultistepScheduler,
     DPMSolverSinglestepScheduler,
     LMSDiscreteScheduler,
@@ -61,6 +64,8 @@ from diffusers import (
     HeunDiscreteScheduler,
     KDPM2DiscreteScheduler,
     KDPM2AncestralDiscreteScheduler,
+    DEISMultistepScheduler,
+    DPMSolverSDEScheduler,
     AutoencoderKL,
 )
 from library import custom_train_functions
@@ -990,7 +995,7 @@ class BaseDataset(torch.utils.data.Dataset):
         self._length = len(self.buckets_indices)
 
     def shuffle_buckets(self):
-        # set random seed for this epoch
+        # set random seed for this epoch: current_epoch is not incremented
         random.seed(self.seed + self.current_epoch)
 
         random.shuffle(self.buckets_indices)
@@ -2304,7 +2309,7 @@ def debug_dataset(train_dataset, show_input_ids=False):
     logger.info(
         "`S` for next step, `E` for next epoch no. , Escape for exit. / Sキーで次のステップ、Eキーで次のエポック、Escキーで中断、終了します"
     )
-
+    show_input_ids=True
     epoch = 1
     while True:
         logger.info(f"")
@@ -2335,16 +2340,14 @@ def debug_dataset(train_dataset, show_input_ids=False):
                     example["flippeds"],
                 )
             ):
-                logger.info(
-                    f'{ik}, size: {train_dataset.image_data[ik].image_size}, loss weight: {lw}, caption: "{cap}", original size: {orgsz}, crop top left: {crptl}, target size: {trgsz}, flipped: {flpdz}'
-                )
+                infotext=f'{ik}, size: {train_dataset.image_data[ik].image_size}, loss weight: {lw}, caption: "{cap}", original size: {orgsz}, crop top left: {crptl}, target size: {trgsz}, flipped: {flpdz}'
                 if "network_multipliers" in example:
                     print(f"network multiplier: {example['network_multipliers'][j]}")
 
                 if show_input_ids:
-                    logger.info(f"input ids: {iid}")
+                    infotext += f" input ids: {iid}"
                     if "input_ids2" in example:
-                        logger.info(f"input ids2: {example['input_ids2'][j]}")
+                        infotext += f" input ids2: {example['input_ids2'][j]}"
                 if example["images"] is not None:
                     im = example["images"][j]
                     logger.info(f"image size: {im.size()}")
@@ -2379,6 +2382,12 @@ def debug_dataset(train_dataset, show_input_ids=False):
                     if not os.path.exists(debug_folder):
                         os.mkdir(debug_folder)
                     cv2.imwrite(f"{debug_folder}{epoch}_{steps}.jpg", im)
+                    with open(f"{debug_folder}{epoch}_{steps}.txt",mode='w') as f:
+                        f.write(infotext)
+                    if "conditioning_images" in example:
+                        cv2.imwrite(f"{debug_folder}{epoch}_{steps}_condition.jpg", cond_img)
+                    if "alpha_masks" in example and example["alpha_masks"] is not None:
+                        cv2.imwrite(f"{debug_folder}{epoch}_{steps}_alpha.jpg", alpha_mask)
                     if k == 27 or k == ord("s") or k == ord("e"):
                         break
             steps += 1
@@ -3410,6 +3419,82 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         help="specify WandB API key to log in before starting training (optional). / WandB APIキーを指定して学習開始前にログインする（オプション）",
     )
     parser.add_argument("--log_config", action="store_true", help="log training configuration / 学習設定をログに出力する")
+
+    parser.add_argument(
+        "--train_scheduler",
+        type=str,
+        default="ddpm",
+        choices=[
+            "ddpm",
+            "ddim",
+            "pndm",
+            "lms",
+            "edmeuler",
+            "flow_euler",
+            "euler",
+            "euler_a",
+            "heun",
+            "dpm_2",
+            "dpm_2_a",
+            "dpmsolver",
+            "dpmsolver++",
+            "sde-dpmsolver++",
+            "dpmsingle",
+            "deis",
+            "dpmsde"
+        ],
+        help=f"train noise scheduler type for training",
+    )
+
+    parser.add_argument(
+        "--train_scheduler_args",
+        type=str,
+        default=None,
+        nargs="*",
+        help='additional arguments for train_scheduler',
+    )
+
+    parser.add_argument(
+        "--timestep_sampling",
+        choices=["uniform", "sigmoid","increase","decrease","normal"],
+        default="uniform",
+        help="Method to sample timesteps: uniform random, sigmoid of random normal",
+    )
+    
+    parser.add_argument(
+        "--weighting_scheme",
+        type=str,
+        default="sigma_sqrt",
+        choices=["sigma_sqrt", "cosmap", "one", "none"],
+        help="weighting scheme for timestep distribution. Default is sigma_sqrt",
+    )
+
+    parser.add_argument(
+        "--sigmoid_scale",
+        type=float,
+        default=1.0,
+        help='Scale factor for sigmoid timestep sampling (only used when timestep-sampling is "sigmoid"). / sigmoidタイムステップサンプリングの倍率（timestep-samplingが"sigmoid"の場合のみ有効）。',
+    )
+
+    parser.add_argument(
+        "--sigmoid_bias",
+        type=float,
+        default=0.0,
+        help='mean of timesteps for sigmoid timestep sampling (only used when timestep-sampling is "sigmoid").',
+    )
+
+    parser.add_argument(
+        "--use_flow_timesteps",
+        action="store_true",
+        help="use flow euler scheduler's timesteps and shifting instead of original noise scheduler's",
+    )
+
+    parser.add_argument(
+        "--timestep_shift",
+        type=float,
+        default=1.0,
+        help='shifting timestep by this value. must 0 or more. value >1 will shift distribution to noisy side (focus more on overall structure), value <1 will shift towards less-noisy side (focus more on details)',
+    )
 
     parser.add_argument(
         "--noise_offset",
@@ -4486,7 +4571,10 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
             if value=="%TRAIN_STEPS%":
                 value = num_training_steps-num_warmup_steps
             else:
-                value = ast.literal_eval(value)
+                try:
+                    value = ast.literal_eval(value)
+                except ValueError:
+                    value = value
             lr_scheduler_kwargs[key] = value
 
     def wrap_check_needless_num_warmup_steps(return_vals):
@@ -4937,7 +5025,7 @@ def get_hidden_states_sdxl(
 
     # text_encoder1
     enc_out = text_encoder1(input_ids1, output_hidden_states=True, return_dict=True)
-    hidden_states1 = enc_out["hidden_states"][11]
+    hidden_states1 = enc_out["hidden_states"][-2]
 
     # text_encoder2
     enc_out = text_encoder2(input_ids2, output_hidden_states=True, return_dict=True)
@@ -5181,7 +5269,7 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
             for sub_file in sub_files:
                 if not sub_file.is_dir():
                     colab_delete_file(sub_file)
-            shutil.rmtree(state_dir_old)
+            #shutil.rmtree(state_dir_old) 삭제할경우 저장이 잘 되지 않아서.
 
 
 def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_no):
@@ -5212,7 +5300,7 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
                 for sub_file in sub_files:
                     if not sub_file.is_dir():
                         colab_delete_file(sub_file)
-                shutil.rmtree(state_dir_old)
+                #shutil.rmtree(state_dir_old)
 
 
 def save_state_on_train_end(args: argparse.Namespace, accelerator):
@@ -5290,15 +5378,82 @@ def save_sd_model_on_train_end_common(
         if args.huggingface_repo_id is not None:
             huggingface_util.upload(args, out_dir, "/" + model_name, force_sync_upload=True)
 
+def create_flow_timesteps(shift=1, num_timestep=1000):
+    timesteps = np.linspace(1, num_timestep, num_timestep, dtype=np.float32)[::-1].copy()
+    timesteps = torch.from_numpy(timesteps).to(dtype=torch.float32, device="cpu")
+    sigmas = timesteps / num_timestep
+    sigmas = shift * sigmas / (1 + (shift - 1) * sigmas)
+    #flow timestep은 1~1000에 소수를 포함해서, 이렇게 처리함
+    flow_timesteps = (sigmas * num_timestep - 1.0).long()
+    return flow_timesteps
 
-def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device):
-    timesteps = torch.randint(min_timestep, max_timestep, (b_size,), device="cpu")
+def get_sigmas(timesteps, noise_scheduler, n_dim=4, dtype=torch.float32, device="cpu"):
+    sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
+    schedule_timesteps = noise_scheduler.timesteps.to(device)
+    timesteps = timesteps.to(device)
+    step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
+    sigma = sigmas[step_indices].flatten()
+    while len(sigma.shape) < n_dim:
+        sigma = sigma.unsqueeze(-1)
+    return sigma
+
+sequential_step = 0
+total_timesteps=[]
+def get_timesteps(args, min_timestep, max_timestep, b_size):
+    global sequential_step
+    num_timestep = max_timestep - min_timestep
+    if args.timestep_sampling == "sigmoid":
+        normal = torch.normal(args.sigmoid_bias, args.sigmoid_scale, (b_size,), device="cpu")
+        t = normal.sigmoid()
+    elif args.timestep_sampling == "increase":
+        timesteps=[]
+        for i in range(b_size):
+            timesteps.append(sequential_step)
+            sequential_step = sequential_step + 1
+            if sequential_step == max_timestep:
+                sequential_step = min_timestep
+        return torch.tensor(timesteps, device="cpu")
+    elif args.timestep_sampling == "decrease":
+        timesteps=[]
+        for i in range(b_size):
+            sequential_step = sequential_step - 1
+            if sequential_step < min_timestep:
+                sequential_step = max_timestep-1
+            timesteps.append(sequential_step)
+        return torch.tensor(timesteps, device="cpu")
+    elif args.timestep_sampling == "normal":
+        global total_timesteps
+        timesteps=[]
+        for i in range(b_size):
+            if len(total_timesteps)==0:
+                total_timesteps = [s for s in range(min_timestep,max_timestep)]
+                random.shuffle(total_timesteps)
+            timesteps.append(total_timesteps.pop())
+        return torch.tensor(timesteps, device="cpu")
+    else:
+        t = torch.rand((b_size,), device="cpu")
+
+    if not args.use_flow_timesteps:
+        t = (t * args.timestep_shift) / (1 + (args.timestep_shift - 1) * t)
+    indices = (t * (max_timestep - min_timestep) + min_timestep).long()
+    timesteps = indices.to(device="cpu")
+    return timesteps
+
+def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device, flow_timesteps=None):
+    timesteps = get_timesteps(args, min_timestep, max_timestep, b_size)
+
+    if args.use_flow_timesteps and flow_timesteps != None:
+        timesteps = flow_timesteps[timesteps].to(device="cpu")
+    # elif 'euler' in args.train_scheduler:
+    #     indices = 999-timesteps #샘플러에서 참조하는 타임스탭은 반대이므로.
+    #     timesteps = noise_scheduler.timesteps[indices].long().to(device="cpu")
 
     if args.loss_type == "huber" or args.loss_type == "smooth_l1":
         if args.huber_schedule == "exponential":
             alpha = -math.log(args.huber_c) / noise_scheduler.config.num_train_timesteps
             huber_c = torch.exp(-alpha * timesteps)
         elif args.huber_schedule == "snr":
+            timesteps = timesteps.to(noise_scheduler.alphas_cumprod.device)
             alphas_cumprod = torch.index_select(noise_scheduler.alphas_cumprod, 0, timesteps)
             sigmas = ((1.0 - alphas_cumprod) / alphas_cumprod) ** 0.5
             huber_c = (1 - args.huber_c) / (1 + sigmas) ** 2 + args.huber_c
@@ -5312,11 +5467,11 @@ def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler,
     else:
         raise NotImplementedError(f"Unknown loss type {args.loss_type}")
 
-    timesteps = timesteps.long().to(device)
+    timesteps = timesteps.to(device)
     return timesteps, huber_c
 
 
-def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
+def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents, flow_timesteps=None):
     # Sample noise that we'll add to the latents
     noise = torch.randn_like(latents, device=latents.device)
     if args.noise_offset:
@@ -5335,24 +5490,26 @@ def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
     min_timestep = 0 if args.min_timestep is None else args.min_timestep
     max_timestep = noise_scheduler.config.num_train_timesteps if args.max_timestep is None else args.max_timestep
 
-    timesteps, huber_c = get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, latents.device)
+    timesteps, huber_c = get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, latents.device, flow_timesteps)
 
-    # Add noise to the latents according to the noise magnitude at each timestep
-    # (this is the forward diffusion process)
-    if args.ip_noise_gamma:
-        if args.ip_noise_gamma_random_strength:
-            strength = torch.rand(1, device=latents.device) * args.ip_noise_gamma
+    noisy_latents = None
+    if 'flow' not in args.train_scheduler:
+        # Add noise to the latents according to the noise magnitude at each timestep
+        # (this is the forward diffusion process)
+        if args.ip_noise_gamma:
+            if args.ip_noise_gamma_random_strength:
+                strength = torch.rand(1, device=latents.device) * args.ip_noise_gamma
+            else:
+                strength = args.ip_noise_gamma
+            noisy_latents = noise_scheduler.add_noise(latents, noise + strength * torch.randn_like(latents), timesteps)
         else:
-            strength = args.ip_noise_gamma
-        noisy_latents = noise_scheduler.add_noise(latents, noise + strength * torch.randn_like(latents), timesteps)
-    else:
-        noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+            noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
     return noise, noisy_latents, timesteps, huber_c
 
 
 def conditional_loss(
-    model_pred: torch.Tensor, target: torch.Tensor, reduction: str, loss_type: str, huber_c: Optional[torch.Tensor]
+    model_pred: torch.Tensor, target: torch.Tensor, reduction: str, loss_type: str, huber_c: Optional[torch.Tensor],
 ):
 
     if loss_type == "l2":
@@ -5374,6 +5531,22 @@ def conditional_loss(
     else:
         raise NotImplementedError(f"Unsupported Loss Type {loss_type}")
     return loss
+
+def compute_loss_weighting(weighting_scheme: str, sigmas=None):
+    """Computes loss weighting scheme for SD3 training.
+
+    Courtesy: This was contributed by Rafie Walker in https://github.com/huggingface/diffusers/pull/8528.
+
+    SD3 paper reference: https://arxiv.org/abs/2403.03206v1.
+    """
+    if weighting_scheme == "sigma_sqrt":
+        weighting = (sigmas**-2.0).float()
+    elif weighting_scheme == "cosmap":
+        bot = 1 - 2 * sigmas + 2 * sigmas**2
+        weighting = 2 / (math.pi * bot)
+    else:
+        weighting = torch.ones_like(sigmas)
+    return weighting
 
 
 def append_lr_to_logs(logs, lr_scheduler, optimizer_type, including_unet=True, use_mechanic=False):
@@ -5404,6 +5577,82 @@ def append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names, use_
             logs["lr/s*lr/" + name] = (
                 s_sum * lr_scheduler.optimizers[-1].param_groups[lr_index]["lr"]
             )
+
+def create_train_scheduler(args):
+    num_train_timesteps=1000
+    train_scheduler = args.train_scheduler
+    sched_init_args = {}
+    
+    if args.train_scheduler_args is not None and len(args.train_scheduler_args) > 0:
+        for arg in args.train_scheduler_args:
+            key, value = arg.split("=")
+            try:
+                value = ast.literal_eval(value)
+            except ValueError:
+                pass
+
+            sched_init_args[key] = value
+
+    if train_scheduler == "ddim":
+        scheduler_cls = DDIMScheduler
+    elif train_scheduler == "ddpm":
+        scheduler_cls = DDPMScheduler
+    elif train_scheduler == "pndm":
+        scheduler_cls = PNDMScheduler
+    elif train_scheduler == "lms":
+        scheduler_cls = LMSDiscreteScheduler
+    elif train_scheduler == "euler":
+        scheduler_cls = EulerDiscreteScheduler
+    elif train_scheduler == "euler_a":
+        scheduler_cls = EulerAncestralDiscreteScheduler
+    elif train_scheduler == "flow_euler":
+        scheduler_cls = FlowMatchEulerDiscreteScheduler
+    elif train_scheduler == "edmeuler":
+        scheduler_cls = EDMEulerScheduler
+    elif train_scheduler == "dpmsolver" or train_scheduler == "dpmsolver++" or train_scheduler == "sde-dpmsolver++":
+        scheduler_cls = DPMSolverMultistepScheduler
+        sched_init_args["algorithm_type"] = train_scheduler
+    elif train_scheduler == "dpmsingle":
+        scheduler_cls = DPMSolverSinglestepScheduler
+    elif train_scheduler == "heun":
+        scheduler_cls = HeunDiscreteScheduler
+    elif train_scheduler == "dpm_2":
+        scheduler_cls = KDPM2DiscreteScheduler
+    elif train_scheduler == "dpm_2_a":
+        scheduler_cls = KDPM2AncestralDiscreteScheduler
+    elif train_scheduler == "deis":
+        scheduler_cls = DEISMultistepScheduler
+    elif train_scheduler == "dpmsde":
+        scheduler_cls = DPMSolverSDEScheduler
+    else:
+        scheduler_cls = DDPMScheduler
+
+    init_keys = list(inspect.signature(scheduler_cls).parameters)
+
+    if "beta_start" in init_keys and not "beta_start" in sched_init_args:
+        sched_init_args["beta_start"] = 0.00085
+
+    if "beta_end" in init_keys and not "beta_end" in sched_init_args:
+        sched_init_args["beta_end"] = 0.012
+
+    if "clip_sample" in init_keys and not "clip_sample" in sched_init_args:
+        sched_init_args["clip_sample"] = False
+
+    if "beta_schedule" in init_keys and not "beta_schedule" in sched_init_args:
+        sched_init_args["beta_schedule"] = "scaled_linear"
+
+    if "prediction_type" in init_keys and not "prediction_type" in sched_init_args:
+        sched_init_args["prediction_type"] = "epsilon"
+
+    if "timestep_spacing" in init_keys and not "timestep_spacing" in sched_init_args:
+        sched_init_args["timestep_spacing"] = "leading"
+
+    scheduler = scheduler_cls(
+        num_train_timesteps=num_train_timesteps,
+        **sched_init_args,
+    )
+
+    return scheduler
 
 
 # scheduler:
@@ -5821,7 +6070,7 @@ class LossRecorder:
         self.loss_total: float = 0.0
 
     def add(self, *, epoch: int, step: int, loss: float) -> None:
-        if epoch == 0:
+        if epoch == 0 or step >= len(self.loss_list):
             self.loss_list.append(loss)
         else:
             while len(self.loss_list) <= step:

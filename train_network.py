@@ -70,8 +70,6 @@ class NetworkTrainer:
             logs["max_norm/average_key_norm"] = mean_norm
             logs["max_norm/max_key_norm"] = maximum_norm
 
-        lrs = lr_scheduler.get_last_lr()
-
         if args.use_mechanic:
             if 's' in lr_scheduler.optimizers[-1].state['_mechanic']:
                 s = lr_scheduler.optimizers[-1].state['_mechanic']['s']
@@ -79,10 +77,18 @@ class NetworkTrainer:
             else:
                 s_sum = 1
 
-        for i in range(len(lrs)):
-            logs[f"lr/group{i}"] = float(lrs[i])
-            if "DAdapt".lower() in args.optimizer_type.lower() or "Prodigy".lower() in args.optimizer_type.lower():
-                logs[f"lr/d*lr/group{i}"] = (
+        lrs = lr_scheduler.get_last_lr()
+        for i, lr in enumerate(lrs):
+            if lr_descriptions is not None:
+                lr_desc = lr_descriptions[i]
+            else:
+                lr_desc = f"group{i}"
+
+            logs[f"lr/{lr_desc}"] = lr
+
+            if args.optimizer_type.lower().startswith("DAdapt".lower()) or "Prodigy".lower() in args.optimizer_type.lower():
+                # tracking d*lr value
+                logs[f"lr/d*lr/{lr_desc}"] = (
                     lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
                 )
             if args.use_mechanic:
@@ -340,7 +346,7 @@ class NetworkTrainer:
         # 学習に必要なクラスを準備する
         accelerator.print("prepare optimizer, data loader etc.")
 
-        text_encoder_lrs = [tlr for tlr in text_encoder_lrs if tlr!=0]
+        text_encoder_lrs = [tlr for tlr in text_encoder_lrs if tlr!=0] if 'kohya' in args.network_module else text_encoder_lrs[0]
         # 後方互換性を確保するよ
         try:
             results = network.prepare_optimizer_params(text_encoder_lrs, args.unet_lr, args.learning_rate)
@@ -577,6 +583,7 @@ class NetworkTrainer:
         # accelerator.print(f"  total train batch size (with parallel & distributed & accumulation) / 総バッチサイズ（並列学習、勾配合計含む）: {total_batch_size}")
         accelerator.print(f"  gradient accumulation steps / 勾配を合計するステップ数 = {args.gradient_accumulation_steps}")
         accelerator.print(f"  total optimization steps / 学習ステップ数: {args.max_train_steps}")
+        accelerator.print(f"  timestep sampling: {args.timestep_sampling}")
 
         # TODO refactor metadata creation and move to util
         metadata = {
@@ -632,6 +639,12 @@ class NetworkTrainer:
             "ss_loss_type": args.loss_type,
             "ss_huber_schedule": args.huber_schedule,
             "ss_huber_c": args.huber_c,
+            "ss_train_noise_scheduler": args.train_scheduler,
+            "ss_timestep_sampling" : args.timestep_sampling,
+            "ss_sigmoid_scale" : args.sigmoid_scale,
+            "ss_sigmoid_bias" : args.sigmoid_bias,
+            "ss_weighting_scheme" : args.weighting_scheme,
+            "ss_timestep_shift" : args.timestep_shift,
         }
 
         if use_user_config:
@@ -843,13 +856,31 @@ class NetworkTrainer:
                 initial_step = 0  # do not skip
 
         global_step = 0
+        edm_training = False
+        # noise_scheduler = DDPMScheduler(
+        #     beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000, clip_sample=False
+        # )
+        noise_scheduler = train_util.create_train_scheduler(args) #커스텀 트레인 스케쥴러
+        if 'euler' in args.train_scheduler:
+            edm_training = True
+            print("edm training")
 
-        noise_scheduler = DDPMScheduler(
-            beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000, clip_sample=False
-        )
-        prepare_scheduler_for_custom_training(noise_scheduler, accelerator.device)
+        if edm_training and args.min_snr_gamma is not None:
+            raise ValueError("Min-SNR formulation is not supported when conducting EDM-style training.")
+        
+        print(noise_scheduler) #for debugging
+        if hasattr(noise_scheduler,'alphas_cumprod'):
+            prepare_scheduler_for_custom_training(noise_scheduler, accelerator.device)
+        else:
+            print("this noise scheduler doesn't support huber. Forcely change it to l2")
+            args.loss_type = "l2"
         if args.zero_terminal_snr:
             custom_train_functions.fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler)
+
+        flow_timesteps = None
+        if args.use_flow_timesteps:
+            print("use FlowMatchEulerDiscreteScheduler's timestep")
+            flow_timesteps = train_util.create_flow_timesteps(args.timestep_shift)
 
         if accelerator.is_main_process:
             init_kwargs = {}
@@ -909,6 +940,12 @@ class NetworkTrainer:
         for epoch in range(epoch_to_start, num_train_epochs):
             accelerator.print(f"\nepoch {epoch+1}/{num_train_epochs}")
             current_epoch.value = epoch + 1
+
+            steps_per_epoch = math.ceil(len(train_dataloader) / accelerator.num_processes / args.gradient_accumulation_steps)
+            if initial_step > steps_per_epoch:
+                logger.info(f"skipping epoch {epoch+1} because initial_step (multiplied) is {initial_step}")
+                initial_step -= steps_per_epoch
+                continue
 
             metadata["ss_epoch"] = str(epoch + 1)
 
@@ -972,8 +1009,18 @@ class NetworkTrainer:
                     # Sample noise, sample a random timestep for each image, and add noise to the latents,
                     # with noise offset and/or multires noise if specified
                     noise, noisy_latents, timesteps, huber_c = train_util.get_noise_noisy_latents_and_timesteps(
-                        args, noise_scheduler, latents
+                        args, noise_scheduler, latents, flow_timesteps
                     )
+
+                    if edm_training:
+                        sigmas = train_util.get_sigmas(timesteps, noise_scheduler, latents.ndim, weight_dtype, accelerator.device)
+                        if 'flow' in args.train_scheduler: 
+                            noisy_latents = sigmas * noise + (1.0 - sigmas) * latents
+                            inp_noisy_latents = noisy_latents
+                        if 'edm' in args.train_scheduler:
+                            inp_noisy_latents = noise_scheduler.precondition_inputs(noisy_latents, sigmas)
+                        else:
+                            inp_noisy_latents = noisy_latents / ((sigmas**2 + 1) ** 0.5)
 
                     # ensure the hidden state will require grad
                     if args.gradient_checkpointing:
@@ -981,6 +1028,9 @@ class NetworkTrainer:
                             x.requires_grad_(True)
                         for t in text_encoder_conds:
                             t.requires_grad_(True)
+                        if edm_training:
+                            for x in inp_noisy_latents:
+                                x.requires_grad_(True)
 
                     # Predict the noise residual
                     with accelerator.autocast():
@@ -988,22 +1038,52 @@ class NetworkTrainer:
                             args,
                             accelerator,
                             unet,
-                            noisy_latents.requires_grad_(train_unet),
+                            inp_noisy_latents.requires_grad_(train_unet) if edm_training else noisy_latents.requires_grad_(train_unet),
                             timesteps,
                             text_encoder_conds,
                             batch,
                             weight_dtype,
                         )
 
+                    weighting = None
+                    if edm_training:
+                        if args.weighting_scheme == "none":
+                            pass
+                        else:
+                            # Similar to the input preconditioning, the model predictions are also preconditioned
+                            # on noised model inputs (before preconditioning) and the sigmas.
+                            # Follow: Section 5 of https://arxiv.org/abs/2206.00364.
+                            if 'edm' in args.train_scheduler:
+                                noise_pred = noise_scheduler.precondition_outputs(noisy_latents, noise_pred, sigmas)
+                            else:
+                                #FLOW EULER는 prediction type이 없음
+                                if hasattr(noise_scheduler.config, "prediction_type"):
+                                    if noise_scheduler.config.prediction_type == "epsilon":
+                                        noise_pred = noise_pred * (-sigmas) + noisy_latents
+                                    elif noise_scheduler.config.prediction_type == "v_prediction":
+                                        noise_pred = noise_pred * (-sigmas / (sigmas**2 + 1) ** 0.5) + (
+                                            noisy_latents / (sigmas**2 + 1)
+                                        )
+                                else:
+                                    noise_pred = noise_pred * (-sigmas) + noisy_latents
+                            # We are not doing weighting here because it tends result in numerical problems.
+                            # See: https://github.com/huggingface/diffusers/pull/7126#issuecomment-1968523051
+                            # There might be other alternatives for weighting as well:
+                            # https://github.com/huggingface/diffusers/pull/7126#discussion_r1505404686
+                            if 'edm' not in args.train_scheduler:
+                                weighting = train_util.compute_loss_weighting(args.weighting_scheme, sigmas)
+
                     if args.v_parameterization:
                         # v-parameterization training
-                        target = noise_scheduler.get_velocity(latents, noise, timesteps)
+                        target = latents if edm_training else noise_scheduler.get_velocity(latents, noise, timesteps)
                     else:
-                        target = noise
+                        target = latents if edm_training else noise
 
                     loss = train_util.conditional_loss(
                         noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c
                     )
+                    if weighting is not None:
+                        loss = loss * weighting
                     if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
                         loss = apply_masked_loss(loss, batch)
                     loss = loss.mean([1, 2, 3])
@@ -1069,16 +1149,16 @@ class NetworkTrainer:
                 loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
                 avr_loss: float = loss_recorder.moving_average
 
-                if args.scale_weight_norms:
-                    progress_bar.set_postfix(**{**max_mean_logs, **logs})
-
-                if args.logging_dir is not None:
-                    logs = self.generate_step_logs(
+                logs = self.generate_step_logs(
                         args, current_loss, avr_loss, lr_scheduler, lr_descriptions, keys_scaled, mean_norm, maximum_norm
                     )
+                if args.logging_dir is not None:                    
                     accelerator.log(logs, step=global_step)
 
                 progress_bar.set_postfix(**logs)
+
+                if args.scale_weight_norms:
+                    progress_bar.set_postfix(**{**max_mean_logs, **logs})
 
                 if global_step >= args.max_train_steps:
                     break

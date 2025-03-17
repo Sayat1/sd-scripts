@@ -99,6 +99,11 @@ def _load_target_model(
             logit_scale,
             ckpt_info,
         ) = sdxl_model_util.load_models_from_sdxl_checkpoint(model_version, name_or_path, device, model_dtype, disable_mmap)
+
+        # VAEを読み込む
+        if vae_path is not None:
+            vae = model_util.load_vae(vae_path, weight_dtype)
+            logger.info("additional VAE loaded")
     else:
         # Diffusers model is loaded to CPU
         # from diffusers import StableDiffusionXLPipeline
@@ -152,11 +157,6 @@ def _load_target_model(
 
         logit_scale = None
         ckpt_info = None
-
-    # # VAEを読み込む
-    # if vae_path is not None:
-    #     vae = model_util.load_vae(vae_path, weight_dtype)
-    #     logger.info("additional VAE loaded")
 
     return load_stable_diffusion_format, text_encoder1, text_encoder2, vae, unet, logit_scale, ckpt_info
 

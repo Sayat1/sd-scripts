@@ -4,3 +4,5 @@ dadaptation
 lion-pytorch
 schedulefree
 bitsandbytes
+diffusers[torch]
+huggingface-hub
