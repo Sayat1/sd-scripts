@@ -7,3 +7,7 @@ build
 .vscode
 wandb
 *.toml
+timestep_viewer.py
+tran_db_options.txt
+xl_network_options.txt
+tran_network_options.txt
