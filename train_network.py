@@ -877,11 +877,6 @@ class NetworkTrainer:
         if args.zero_terminal_snr:
             custom_train_functions.fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler)
 
-        flow_timesteps = None
-        if args.use_flow_timesteps:
-            print("use FlowMatchEulerDiscreteScheduler's timestep")
-            flow_timesteps = train_util.create_flow_timesteps(args.timestep_shift)
-
         if accelerator.is_main_process:
             init_kwargs = {}
             if args.wandb_run_name:
@@ -1009,7 +1004,7 @@ class NetworkTrainer:
                     # Sample noise, sample a random timestep for each image, and add noise to the latents,
                     # with noise offset and/or multires noise if specified
                     noise, noisy_latents, timesteps, huber_c = train_util.get_noise_noisy_latents_and_timesteps(
-                        args, noise_scheduler, latents, flow_timesteps
+                        args, noise_scheduler, latents
                     )
 
                     if edm_training:
