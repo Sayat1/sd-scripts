@@ -2,6 +2,6 @@
 prodigyopt
 dadaptation
 lion-pytorch
-schedulefree
-bitsandbytes
+schedulefree==1.4
 prodigy-plus-schedule-free
+bitsandbytes
