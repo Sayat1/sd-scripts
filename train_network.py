@@ -87,10 +87,15 @@ class NetworkTrainer:
             logs[f"lr/{lr_desc}"] = lr
 
             if args.optimizer_type.lower().startswith("DAdapt".lower()) or "Prodigy".lower() in args.optimizer_type.lower():
-                # tracking d*lr value
-                logs[f"lr/d*lr/{lr_desc}"] = (
-                    lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
-                )
+                if args.optimizer_type.endswith("schedulefree".lower()):
+                    logs[f"lr/d*lr/{lr_desc}"] = (
+                        lr_scheduler.optimizer.param_groups[i]["d"] * lr_scheduler.optimizer.param_groups[i]["lr"]
+                    )
+                else:
+                    # tracking d*lr value
+                    logs[f"lr/d*lr/{lr_desc}"] = (
+                        lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
+                    )
             if args.use_mechanic:
                 logs[f"lr/s*lr/group{i}"] = (
                     s_sum * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
