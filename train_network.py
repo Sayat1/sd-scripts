@@ -1163,10 +1163,6 @@ class NetworkTrainer:
                 if global_step >= args.max_train_steps:
                     break
 
-            if args.logging_dir is not None:
-                logs = {"loss/epoch": loss_recorder.moving_average}
-                accelerator.log(logs, step=epoch + 1)
-
             accelerator.wait_for_everyone()
 
             # 指定エポックごとにモデルを保存
