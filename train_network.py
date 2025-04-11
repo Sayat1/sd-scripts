@@ -573,6 +573,7 @@ class NetworkTrainer:
         if (args.save_n_epoch_ratio is not None) and (args.save_n_epoch_ratio > 0):
             args.save_every_n_epochs = math.floor(num_train_epochs / args.save_n_epoch_ratio) or 1
 
+        
         # 学習する
         # TODO: find a way to handle total batch size when there are multiple datasets
         total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -870,6 +871,9 @@ class NetworkTrainer:
             edm_training = True
             print("edm training")
 
+        if args.timestep_sampling == "fixedepoch":
+            noise_scheduler.set_timesteps(num_train_epochs)
+
         if edm_training and args.min_snr_gamma is not None:
             raise ValueError("Min-SNR formulation is not supported when conducting EDM-style training.")
         
@@ -1017,7 +1021,7 @@ class NetworkTrainer:
                     # Sample noise, sample a random timestep for each image, and add noise to the latents,
                     # with noise offset and/or multires noise if specified
                     noise, noisy_latents, timesteps, huber_c = train_util.get_noise_noisy_latents_and_timesteps(
-                        args, noise_scheduler, latents
+                        args, noise_scheduler, latents, epoch,
                     )
 
                     if edm_training:

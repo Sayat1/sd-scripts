@@ -3455,7 +3455,7 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
 
     parser.add_argument(
         "--timestep_sampling",
-        choices=["uniform", "sigmoid","increase","decrease","normal"],
+        choices=["uniform", "sigmoid","increase","decrease","normal","fixedepoch"],
         default="uniform",
         help="Method to sample timesteps: uniform random, sigmoid of random normal",
     )
@@ -5404,7 +5404,7 @@ def get_sigmas(timesteps, noise_scheduler, n_dim=4, dtype=torch.float32, device=
 
 sequential_step = 0
 total_timesteps=[]
-def get_timesteps(args, min_timestep, max_timestep, b_size):
+def get_timesteps(args, min_timestep, max_timestep, b_size, epoch, noise_scheduler):
     global sequential_step
     num_timestep = max_timestep - min_timestep
     if args.timestep_sampling == "sigmoid":
@@ -5435,6 +5435,9 @@ def get_timesteps(args, min_timestep, max_timestep, b_size):
                 random.shuffle(total_timesteps)
             timesteps.append(total_timesteps.pop())
         return torch.tensor(timesteps, device="cpu")
+    elif args.timestep_sampling == "fixedepoch":
+        timesteps=[noise_scheduler.timesteps[epoch] for i in range(b_size)]
+        return torch.tensor(timesteps, device="cpu")
     else:
         t = torch.rand((b_size,), device="cpu")
 
@@ -5442,8 +5445,8 @@ def get_timesteps(args, min_timestep, max_timestep, b_size):
     timesteps = indices.to(device="cpu")
     return timesteps
 
-def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device):
-    timesteps = get_timesteps(args, min_timestep, max_timestep, b_size)
+def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device, epoch):
+    timesteps = get_timesteps(args, min_timestep, max_timestep, b_size, epoch, noise_scheduler)
 
     # elif 'euler' in args.train_scheduler:
     #     indices = 999-timesteps #샘플러에서 참조하는 타임스탭은 반대이므로.
@@ -5472,7 +5475,7 @@ def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler,
     return timesteps, huber_c
 
 
-def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
+def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents, epoch):
     # Sample noise that we'll add to the latents
     noise = torch.randn_like(latents, device=latents.device)
     if args.noise_offset:
@@ -5491,7 +5494,7 @@ def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
     min_timestep = 0 if args.min_timestep is None else args.min_timestep
     max_timestep = noise_scheduler.config.num_train_timesteps if args.max_timestep is None else args.max_timestep
 
-    timesteps, huber_c = get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, latents.device)
+    timesteps, huber_c = get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, latents.device, epoch)
 
     noisy_latents = None
     if 'flow' not in args.train_scheduler:
