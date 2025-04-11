@@ -5436,7 +5436,7 @@ def get_timesteps(args, min_timestep, max_timestep, b_size, epoch, noise_schedul
             timesteps.append(total_timesteps.pop())
         return torch.tensor(timesteps, device="cpu")
     elif args.timestep_sampling == "fixedepoch":
-        timesteps=[noise_scheduler.timesteps[epoch] for i in range(b_size)]
+        timesteps=[noise_scheduler.timesteps[epoch].int() for i in range(b_size)]
         return torch.tensor(timesteps, device="cpu")
     else:
         t = torch.rand((b_size,), device="cpu")
