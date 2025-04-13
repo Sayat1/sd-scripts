@@ -3455,7 +3455,7 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
 
     parser.add_argument(
         "--timestep_sampling",
-        choices=["uniform", "sigmoid","increase","decrease","normal"],
+        choices=["uniform", "sigmoid", "shift", "increase", "decrease", "normal"],
         default="uniform",
         help="Method to sample timesteps: uniform random, sigmoid of random normal",
     )
