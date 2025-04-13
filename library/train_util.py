@@ -3486,7 +3486,7 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         "--timestep_shift",
         type=float,
         default=1.0,
-        help='shifting timestep by this value. must 0 or more. value >1 will shift distribution to noisy side (focus more on overall structure), value <1 will shift towards less-noisy side (focus more on details)',
+        help='shifting timestep by this value. must 0 or more. value >1 will shift distribution to noisy side (focus more on overall structure), value <1 will shift towards less-noisy side (focus more on details) (only used when timestep-sampling is "shift").',
     )
 
     parser.add_argument(
@@ -5435,6 +5435,12 @@ def get_timesteps(args, min_timestep, max_timestep, b_size):
                 random.shuffle(total_timesteps)
             timesteps.append(total_timesteps.pop())
         return torch.tensor(timesteps, device="cpu")
+    elif args.timestep_sampling == "shift":
+        shift = args.timestep_shift
+        logits_norm = torch.randn(b_size, device="cpu")
+        logits_norm = logits_norm * args.sigmoid_scale  # larger scale for more uniform sampling
+        t_sigmoid = logits_norm.sigmoid()
+        t = (t_sigmoid * shift) / (1 + (shift - 1) * t_sigmoid)
     else:
         t = torch.rand((b_size,), device="cpu")
 
