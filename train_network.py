@@ -89,7 +89,7 @@ class NetworkTrainer:
             if args.optimizer_type.lower().startswith("DAdapt".lower()) or "Prodigy".lower() in args.optimizer_type.lower():
                 if args.optimizer_type.lower().endswith("schedulefree"):
                     logs[f"lr/d*lr/{lr_desc}"] = (
-                        lr_scheduler.optimizer.param_groups[i]["d"] * lr_scheduler.optimizer.param_groups[i]["lr"]
+                        lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
                     )
                 else:
                     # tracking d*lr value
@@ -870,8 +870,8 @@ class NetworkTrainer:
             edm_training = True
             print("edm training")
 
-        if edm_training and args.min_snr_gamma is not None:
-            raise ValueError("Min-SNR formulation is not supported when conducting EDM-style training.")
+        # if edm_training and args.min_snr_gamma is not None:
+        #     raise ValueError("Min-SNR formulation is not supported when conducting EDM-style training.")
         
         print(noise_scheduler) #for debugging
         if hasattr(noise_scheduler,'alphas_cumprod'):
