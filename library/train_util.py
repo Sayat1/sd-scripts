@@ -4487,6 +4487,9 @@ def get_optimizer(args, trainable_params):
             elif optimizer_type == "SGDScheduleFree".lower():
                 optimizer_class = sf.SGDScheduleFree
                 logger.info(f"use SGDScheduleFree optimizer | {optimizer_kwargs}")
+            elif optimizer_type == "RAdamScheduleFree".lower():
+                optimizer_class = sf.RAdamScheduleFree
+                logger.info(f"use RAdamScheduleFree optimizer | {optimizer_kwargs}")
             else:
                 raise ValueError(f"Unknown optimizer type: {optimizer_type}")
             optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
