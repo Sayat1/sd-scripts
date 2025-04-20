@@ -4548,12 +4548,12 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
     Unified API to get any scheduler from its name.
     """
     # supports schedule free optimizer
-    if args.optimizer_type.lower().endswith("schedulefree"):
-        # return dummy scheduler: it has 'step' method but does nothing
-        logger.info("use dummy scheduler for schedule free optimizer / schedule free optimizer用のダミースケジューラを使用します")
-        lr_scheduler = TYPE_TO_SCHEDULER_FUNCTION[SchedulerType.CONSTANT](optimizer)
-        lr_scheduler.step = lambda: None
-        return lr_scheduler
+    # if args.optimizer_type.lower().endswith("schedulefree"):
+    #     # return dummy scheduler: it has 'step' method but does nothing
+    #     logger.info("use dummy scheduler for schedule free optimizer / schedule free optimizer用のダミースケジューラを使用します")
+    #     lr_scheduler = TYPE_TO_SCHEDULER_FUNCTION[SchedulerType.CONSTANT](optimizer)
+    #     lr_scheduler.step = lambda: None
+    #     return lr_scheduler
 
     name = args.lr_scheduler
     num_training_steps = args.max_train_steps * num_processes  # * args.gradient_accumulation_steps

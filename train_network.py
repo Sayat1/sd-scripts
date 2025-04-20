@@ -89,7 +89,7 @@ class NetworkTrainer:
             if args.optimizer_type.lower().startswith("DAdapt".lower()) or "Prodigy".lower() in args.optimizer_type.lower():
                 if args.optimizer_type.lower().endswith("schedulefree"):
                     logs[f"lr/d*lr/{lr_desc}"] = (
-                        lr_scheduler.optimizer.param_groups[i]["d"] * lr_scheduler.optimizer.param_groups[i]["lr"]
+                        lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
                     )
                 else:
                     # tracking d*lr value
@@ -455,9 +455,7 @@ class NetworkTrainer:
                 text_encoder2=text_encoders[1] if train_text_encoder and len(text_encoders) > 1 and train_text_encoder[1] else None,
                 network=network,
             )
-            ds_model, optimizer, train_dataloader = accelerator.prepare(ds_model, optimizer, train_dataloader)
-            if not use_schedule_free_optimizer:
-                lr_scheduler = accelerator.prepare(lr_scheduler)
+            ds_model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(ds_model, optimizer, train_dataloader, lr_scheduler)
             training_model = ds_model
         else:
             if train_unet:
@@ -473,9 +471,7 @@ class NetworkTrainer:
             else:
                 pass  # if text_encoder is not trained, no need to prepare. and device and dtype are already set
 
-            network, optimizer, train_dataloader = accelerator.prepare(network, optimizer, train_dataloader)
-            if not use_schedule_free_optimizer:
-                lr_scheduler = accelerator.prepare(lr_scheduler)
+            network, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(network, optimizer, train_dataloader, lr_scheduler)
             training_model = network
 
         # make lambda function for calling optimizer.train() and optimizer.eval() if schedule-free optimizer is used
