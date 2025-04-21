@@ -4543,6 +4543,17 @@ def lr_lambda_constant():
 
     return lr_lambda
 
+def lr_lambda_constant_step(step1,step2):
+    def lr_lambda(current_step: int):
+        if step2 < current_step:
+            return 1
+        elif step1 < current_step:
+            return 0.5
+        else:
+            return 0.1
+
+    return lr_lambda
+
 def lr_lambda_constant_zero_turn_one(turn_step:int):
     def lr_lambda(current_step: int):
         if current_step < turn_step:
@@ -4731,21 +4742,14 @@ def get_lr_schedule(args, optimizer, num_processes):
     args.lr_warmup_steps = 0
     lr_scheduler1 = get_scheduler_fix(args, optimizer, num_processes)
 
-    args.lr_scheduler = ""
-    args.lr_warmup_steps = 0.5
-    num_warmup_steps: Optional[int] = (
-        int(args.lr_warmup_steps * num_training_steps) if isinstance(args.lr_warmup_steps, float) else args.lr_warmup_steps
-    )
-    lr_scheduler2 = lr_lambda_constant_zero_turn_one(num_warmup_steps)
+    args.lr_scheduler = "constant"
+    args.lr_warmup_steps = 0
+    lr_scheduler2 = get_scheduler_fix(args, optimizer, num_processes)
 
-    args.lr_warmup_steps = 0.5
-    num_warmup_steps: Optional[int] = (
-        int(args.lr_warmup_steps * num_training_steps) if isinstance(args.lr_warmup_steps, float) else args.lr_warmup_steps
-    )
-    lr_scheduler3 = lr_lambda_constant_zero_turn_one(num_warmup_steps)
+    lr_scheduler3 = lr_lambda_constant_step(int(num_training_steps*0.33),int(num_training_steps*0.66))
 
     return LambdaLR(optimizer=optimizer,
-                    lr_lambda=[lr_scheduler1.lr_lambdas[0],lr_scheduler2,lr_scheduler3],
+                    lr_lambda=[lr_scheduler1.lr_lambdas[0],lr_scheduler2.lr_lambdas[0],lr_scheduler3],
                     last_epoch=-1
                     )
 
