@@ -351,7 +351,7 @@ class NetworkTrainer:
         # 学習に必要なクラスを準備する
         accelerator.print("prepare optimizer, data loader etc.")
 
-        text_encoder_lrs = [tlr for tlr in text_encoder_lrs if tlr!=0] if 'kohya' in args.network_module else text_encoder_lrs[0]
+        text_encoder_lrs = [tlr if tlr!=0 else None for tlr in text_encoder_lrs] if 'kohya' in args.network_module else text_encoder_lrs[0]
         # 後方互換性を確保するよ
         try:
             results = network.prepare_optimizer_params(text_encoder_lrs, args.unet_lr, args.learning_rate)
