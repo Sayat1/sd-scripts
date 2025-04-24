@@ -35,6 +35,7 @@ import toml
 from tqdm import tqdm
 
 import torch
+import pandas as pd
 from library.device_utils import init_ipex, clean_memory_on_device
 
 init_ipex()
@@ -3641,6 +3642,12 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         help="using .toml instead of args to pass hyperparameter / ハイパーパラメータを引数ではなく.tomlファイルで渡す",
     )
     parser.add_argument(
+        "--lr_tb_file",
+        type=str,
+        default=None,
+        help="tensorboard file to use as Learning rate",
+    )
+    parser.add_argument(
         "--output_config", action="store_true", help="output command line args to given .toml file / 引数を.tomlファイルに出力する"
     )
 
@@ -4734,22 +4741,68 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
         **lr_scheduler_kwargs,
     )
 
+
+
+def convert_tb_data(filepath):
+    from tensorflow.python.summary.summary_iterator import summary_iterator
+
+    def convert_tfevent(filepath):
+        return pd.DataFrame([
+            parse_tfevent(e) for e in summary_iterator(filepath) if len(e.summary.value)
+        ])
+
+    def parse_tfevent(tfevent):
+        return dict(
+            name=tfevent.summary.value[0].tag,
+            step=tfevent.step,
+            value=float(tfevent.summary.value[0].simple_value),
+        )
+    
+    columns_order = ['name', 'step', 'value']
+    
+    out = convert_tfevent(filepath=filepath)
+
+    # Concatenate (and sort) all partial individual dataframes
+    all_df = out[columns_order]
+        
+    return all_df.reset_index(drop=True)
+
+def lr_from_tb(df:pd.DataFrame,column_name:str):
+    group_df = df[df['name'] == column_name]
+    init_lr = group_df['value'].iloc[0]
+    changed = group_df[group_df['value'] != group_df['value'].shift(1)]
+    def lr_lambda(current_step:int):
+        try:
+            return changed[changed['step'] <= current_step]['value'].iloc[-1]
+        except IndexError:
+            return init_lr
+    return lr_lambda
+
 def get_lr_schedule(args, optimizer, num_processes):
     from torch.optim.lr_scheduler import LambdaLR,SequentialLR
     num_training_steps = args.max_train_steps * num_processes
+    if args.lr_tb_file:
+        df = convert_tb_data(args.lr_tb_file)
+        lr_scheduler1 = lr_from_tb(df,"lr/d*lr/group0")
+        lr_scheduler2 = lr_from_tb(df,"lr/d*lr/group1")
+        lr_scheduler3 = lr_from_tb(df,"lr/d*lr/group2")
+    else:
+        args.lr_scheduler = "constant"
+        args.lr_warmup_steps = 0
+        lr_scheduler1 = get_scheduler_fix(args, optimizer, num_processes)
 
-    args.lr_scheduler = "constant"
-    args.lr_warmup_steps = 0
-    lr_scheduler1 = get_scheduler_fix(args, optimizer, num_processes)
+        args.lr_scheduler = "constant"
+        args.lr_warmup_steps = 0
+        lr_scheduler2 = get_scheduler_fix(args, optimizer, num_processes)
 
-    args.lr_scheduler = "constant"
-    args.lr_warmup_steps = 0
-    lr_scheduler2 = get_scheduler_fix(args, optimizer, num_processes)
-
-    lr_scheduler3 = lr_lambda_constant_step(int(num_training_steps*0.33),int(num_training_steps*0.66))
+        lr_scheduler3 = lr_lambda_constant_step(int(num_training_steps*0.33),int(num_training_steps*0.66))
 
     return LambdaLR(optimizer=optimizer,
-                    lr_lambda=[lr_scheduler1.lr_lambdas[0],lr_scheduler2.lr_lambdas[0],lr_scheduler3],
+                    lr_lambda=[
+                        lr_scheduler1.lr_lambdas[0] if type(lr_scheduler1) == LambdaLR else lr_scheduler1,
+                        lr_scheduler2.lr_lambdas[0] if type(lr_scheduler2) == LambdaLR else lr_scheduler2,
+                        lr_scheduler3.lr_lambdas[0] if type(lr_scheduler3) == LambdaLR else lr_scheduler3
+                        ],
                     last_epoch=-1
                     )
 
