@@ -78,6 +78,8 @@ class NetworkTrainer:
                 s_sum = 1
 
         lrs = lr_scheduler.get_last_lr()
+        for i,beta in enumerate(lr_scheduler.optimizers[-1].param_groups[0]["betas"]):
+            logs[f"beta{i+1}"] = beta
         for i, lr in enumerate(lrs):
             if lr_descriptions is not None:
                 lr_desc = lr_descriptions[i]
@@ -923,6 +925,20 @@ class NetworkTrainer:
                 accelerator.print(f"removing old checkpoint: {old_ckpt_file}")
                 os.remove(old_ckpt_file)
 
+        def beta_warmup(optimizer,global_step,warmup_step):
+            def warmup(step: int):
+                if step < warmup_step:
+                    return float(step) / float(warmup_step)
+                else:
+                    return 1
+                
+            original_betas = optimizer.defaults["betas"]
+            warmingup_betas = [beta * warmup(global_step) for beta in original_betas]
+            warmingup_betas = tuple(warmingup_betas)
+            for param_group in optimizer.param_groups:
+                param_group['betas'] = warmingup_betas
+
+
         # For --sample_at_first
         self.sample_images(accelerator, args, 0, global_step, accelerator.device, vae, tokenizer, text_encoder, unet)
 
@@ -1112,7 +1128,8 @@ class NetworkTrainer:
                         if args.max_grad_norm != 0.0:
                             params_to_clip = accelerator.unwrap_model(network).get_trainable_params()
                             accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
-
+                    
+                    beta_warmup(optimizer, global_step, 150)
                     optimizer.step()
                     lr_scheduler.step()
                     optimizer.zero_grad(set_to_none=True)
