@@ -409,6 +409,7 @@ class NetworkTrainer:
         train_dataset_group.set_max_train_steps(args.max_train_steps)
 
         # lr schedulerを用意する
+        #lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
         lr_scheduler = train_util.get_lr_schedule(args, optimizer, accelerator.num_processes)
 
         # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
@@ -928,7 +929,7 @@ class NetworkTrainer:
         def beta_warmup(optimizer,global_step,warmup_step):
             def warmup(step: int):
                 if step < warmup_step:
-                    return float(step) / float(warmup_step)
+                    return (float(step) / float(warmup_step) * 0.9) + 0.1
                 else:
                     return 1
                 
@@ -1129,7 +1130,7 @@ class NetworkTrainer:
                             params_to_clip = accelerator.unwrap_model(network).get_trainable_params()
                             accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
                     
-                    beta_warmup(optimizer, global_step, 150)
+                    #beta_warmup(optimizer, global_step, 150)
                     optimizer.step()
                     lr_scheduler.step()
                     optimizer.zero_grad(set_to_none=True)

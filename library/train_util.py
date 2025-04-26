@@ -4538,11 +4538,20 @@ def get_optimizer(args, trainable_params):
 def lr_lambda_warmup(warmup_steps: int, lr_lambda: Callable[[int], float]):
     def warmup(current_step: int):
         if current_step < warmup_steps:
-            return float(current_step) / float(warmup_steps)
+            return (float(current_step) / float(warmup_steps) * 0.999)+0.001
         else:
             return lr_lambda(current_step - warmup_steps)
 
     return warmup
+
+def lr_switch_up(switch_step: int, lr_lambda: Callable[[int], float]):
+    def switchup(current_step: int):
+        if current_step < switch_step:
+            return 0.001
+        else:
+            return lr_lambda(current_step - switch_step)
+
+    return switchup
 
 def lr_lambda_constant():
     def lr_lambda(current_step: int):
@@ -4789,13 +4798,13 @@ def get_lr_schedule(args, optimizer, num_processes):
     else:
         args.lr_scheduler = "constant"
         args.lr_warmup_steps = 0
-        lr_scheduler1 = get_scheduler_fix(args, optimizer, num_processes)
+        lr_scheduler1 = lr_lambda_warmup(15, lr_lambda_constant())
 
         args.lr_scheduler = "constant"
         args.lr_warmup_steps = 0
-        lr_scheduler2 = get_scheduler_fix(args, optimizer, num_processes)
+        lr_scheduler2 = lr_switch_up(15,lr_lambda_warmup(15, lr_lambda_constant()))
 
-        lr_scheduler3 = lr_lambda_constant_step(int(num_training_steps*0.33),int(num_training_steps*0.66))
+        lr_scheduler3 = lr_switch_up(15,lr_lambda_warmup(1000, lr_lambda_constant()))
 
     return LambdaLR(optimizer=optimizer,
                     lr_lambda=[
