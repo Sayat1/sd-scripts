@@ -91,6 +91,10 @@ class NetworkTrainer:
                     logs[f"lr/d*lr/{lr_desc}"] = (
                         lr_scheduler.optimizer.param_groups[i]["d"] * lr_scheduler.optimizer.param_groups[i]["lr"]
                     )
+                    if "d_k" in lr_scheduler.optimizers[-1].param_groups[i]:
+                        logs[f"d_k/{lr_desc}"] = (
+                            lr_scheduler.optimizers[-1].param_groups[i]["d_k"]
+                        )
                 else:
                     # tracking d*lr value
                     logs[f"lr/d*lr/{lr_desc}"] = (
