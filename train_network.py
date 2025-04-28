@@ -78,8 +78,6 @@ class NetworkTrainer:
                 s_sum = 1
 
         lrs = lr_scheduler.get_last_lr()
-        for i,beta in enumerate(lr_scheduler.optimizers[-1].param_groups[0]["betas"]):
-            logs[f"beta{i+1}"] = beta
         for i, lr in enumerate(lrs):
             if lr_descriptions is not None:
                 lr_desc = lr_descriptions[i]
@@ -92,6 +90,9 @@ class NetworkTrainer:
                 if args.optimizer_type.lower().endswith("schedulefree"):
                     logs[f"lr/d*lr/{lr_desc}"] = (
                         lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
+                    )
+                    logs[f"d_k/{lr_desc}"] = (
+                        lr_scheduler.optimizers[-1].param_groups[i]["d_k"]
                     )
                 else:
                     # tracking d*lr value
