@@ -4227,7 +4227,11 @@ def get_optimizer(args, trainable_params):
     if args.optimizer_args is not None and len(args.optimizer_args) > 0:
         for arg in args.optimizer_args:
             key, value = arg.split("=")
-            value = ast.literal_eval(value)
+            try:
+                value = ast.literal_eval(value)
+            except ValueError:
+                pass
+            
 
             # value = value.split(",")
             # for i in range(len(value)):
