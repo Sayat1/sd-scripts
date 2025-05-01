@@ -4776,6 +4776,14 @@ def convert_tb_data(filepath):
         
     return all_df.reset_index(drop=True)
 
+def lr_lambda_cosine_cycle_start_zero(
+    current_step: int, *, num_training_steps: int, num_cycles: float, min_lr_rate: float = 0.0
+):
+    progress = float(current_step) / float(max(1, num_training_steps))
+    factor = 0.5 * (1.0 - math.cos(math.pi * float(num_cycles) * 2 * progress))
+    factor = factor * (1 - min_lr_rate) + min_lr_rate
+    return max(0, factor)
+
 def lr_from_tb(df:pd.DataFrame,column_name:str):
     group_df = df[df['name'] == column_name]
     init_lr = group_df['value'].iloc[0]
@@ -4792,19 +4800,24 @@ def get_lr_schedule(args, optimizer, num_processes):
     num_training_steps = args.max_train_steps * num_processes
     if args.lr_tb_file:
         df = convert_tb_data(args.lr_tb_file)
-        lr_scheduler1 = lr_from_tb(df,"lr/d*lr/group0")
-        lr_scheduler2 = lr_from_tb(df,"lr/d*lr/group1")
-        lr_scheduler3 = lr_from_tb(df,"lr/d*lr/group2")
+        lr_scheduler1 = lr_from_tb(df,"lr/d*lr/textencoder 1")
+        lr_scheduler2 = lr_from_tb(df,"lr/d*lr/textencoder 1")
+        lr_scheduler3 = lr_from_tb(df,"lr/d*lr/unet")
     else:
-        args.lr_scheduler = "constant"
-        args.lr_warmup_steps = 0
-        lr_scheduler1 = lr_lambda_warmup(15, lr_lambda_constant())
+        from functools import partial
 
-        args.lr_scheduler = "constant"
-        args.lr_warmup_steps = 0
-        lr_scheduler2 = lr_switch_up(15,lr_lambda_warmup(15, lr_lambda_constant()))
+        args.lr_scheduler = "constant_with_warmup"
+        args.lr_warmup_steps = 15
+        lr_scheduler1 = lr_lambda_warmup(args.lr_warmup_steps, lr_lambda_constant())
 
-        lr_scheduler3 = lr_switch_up(15,lr_lambda_warmup(1000, lr_lambda_constant()))
+        args.lr_scheduler = "constant_with_warmup"
+        args.lr_warmup_steps = 150
+        lr_scheduler2 = lr_lambda_warmup(args.lr_warmup_steps, lr_lambda_constant())
+
+        lr_scheduler3 = partial(lr_lambda_cosine_cycle_start_zero,
+            num_training_steps=num_training_steps,
+            num_cycles=5,
+            min_lr_rate=0.01)
 
     return LambdaLR(optimizer=optimizer,
                     lr_lambda=[
