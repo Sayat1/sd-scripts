@@ -4801,7 +4801,7 @@ def get_lr_schedule(args, optimizer, num_processes):
     if args.lr_tb_file:
         df = convert_tb_data(args.lr_tb_file)
         lr_scheduler1 = lr_from_tb(df,"lr/d*lr/textencoder 1")
-        lr_scheduler2 = lr_from_tb(df,"lr/d*lr/textencoder 1")
+        lr_scheduler2 = lr_from_tb(df,"lr/d*lr/textencoder 2")
         lr_scheduler3 = lr_from_tb(df,"lr/d*lr/unet")
     else:
         from functools import partial
