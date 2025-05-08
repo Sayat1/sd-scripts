@@ -249,6 +249,16 @@ class NetworkTrainer:
         # text_encoder is List[CLIPTextModel] or CLIPTextModel
         text_encoders = text_encoder if isinstance(text_encoder, list) else [text_encoder]
 
+        if args.weighted_captions:
+            from compel import Compel, ReturnedEmbeddingsType
+            self.compel = Compel(
+                tokenizer=tokenizers,
+                text_encoder=text_encoders,
+                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                requires_pooled=[False, True],
+                truncate_long_prompts=False
+            )
+
         # モデルに xformers とか memory efficient attention を組み込む
         train_util.replace_unet_modules(unet, args.mem_eff_attn, args.xformers, args.sdpa)
         if torch.__version__ >= "2.0.0":  # PyTorch 2.0.0 以上対応のxformersなら以下が使える
@@ -1004,19 +1014,20 @@ class NetworkTrainer:
 
                     with torch.set_grad_enabled(train_text_encoder), accelerator.autocast():
                         # Get the text embedding for conditioning
-                        if args.weighted_captions:
-                            text_encoder_conds = get_weighted_text_embeddings(
-                                tokenizer,
-                                text_encoder,
-                                batch["captions"],
-                                accelerator.device,
-                                args.max_token_length // 75 if args.max_token_length else 1,
-                                clip_skip=args.clip_skip,
-                            )
-                        else:
-                            text_encoder_conds = self.get_text_cond(
-                                args, accelerator, batch, tokenizers, text_encoders, weight_dtype
-                            )
+                        # if args.weighted_captions:
+                        #     text_encoder_conds = get_weighted_text_embeddings(
+                        #         tokenizer,
+                        #         text_encoder,
+                        #         batch["captions"],
+                        #         accelerator.device,
+                        #         args.max_token_length // 75 if args.max_token_length else 1,
+                        #         clip_skip=args.clip_skip,
+                        #     )
+                        # else:
+                        #weighted_captions 은 함수 안에서 처리
+                        text_encoder_conds = self.get_text_cond(
+                            args, accelerator, batch, tokenizers, text_encoders, weight_dtype
+                        )
 
                     # Sample noise, sample a random timestep for each image, and add noise to the latents,
                     # with noise offset and/or multires noise if specified
