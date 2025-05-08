@@ -31,6 +31,7 @@ import subprocess
 import inspect
 from io import BytesIO
 import toml
+from compel import Compel, ReturnedEmbeddingsType
 
 from tqdm import tqdm
 
@@ -5030,6 +5031,40 @@ def pool_workaround(
 
 compel = None
 
+@torch.enable_grad()
+def get_cond_from_compel(text: Union[str, List[str]]) -> torch.FloatTensor:
+    """
+    Take a string or a list of strings and build conditioning tensors to match.
+
+    If multiple strings are passed, the resulting tensors will be padded until they have the same length.
+
+    :return: A tensor consisting of conditioning tensors for each of the passed-in strings, concatenated along dim 0.
+    """
+    assert compel is not None
+
+    if not isinstance(text, list):
+        text = [text]
+
+    cond_tensor = []
+    pooled = []
+    for text_input in text:
+        output = compel.build_conditioning_tensor(text_input)
+
+        if compel.requires_pooled:
+            cond_tensor.append(output[0])
+            pooled.append(output[1])
+        else:
+            cond_tensor.append(output)
+
+    cond_tensor = compel.pad_conditioning_tensors_to_same_length(conditionings=cond_tensor)
+    cond_tensor = torch.cat(cond_tensor)
+
+    if compel.requires_pooled:
+        pooled = torch.cat(pooled)
+        return cond_tensor, pooled
+    else:
+        return cond_tensor
+
 def get_hidden_states_sdxl(
     max_token_length: int,
     input_ids1: torch.Tensor,
@@ -5045,7 +5080,6 @@ def get_hidden_states_sdxl(
     if captions:
         global compel
         if compel is None:
-            from compel import Compel, ReturnedEmbeddingsType
             compel = Compel(
                 tokenizer=[tokenizer1, tokenizer2] ,
                 text_encoder=[text_encoder1 if accelerator is None else accelerator.unwrap_model(text_encoder1), text_encoder2 if accelerator is None else accelerator.unwrap_model(text_encoder2)],
@@ -5053,12 +5087,12 @@ def get_hidden_states_sdxl(
                 requires_pooled=[False, True],
                 truncate_long_prompts=False
             )
-        conditioning, pooled = compel(captions)
+        conditioning, pooled = get_cond_from_compel(captions)
         conditioning = conditioning.to(accelerator.device if accelerator else text_encoder1.device)
         pool2 = pooled.to(accelerator.device if accelerator else text_encoder1.device)
-        if weight_dtype is not None:
-            conditioning = conditioning.to(weight_dtype)
-            pool2 = pool2.to(weight_dtype)
+        # if weight_dtype is not None: #안해도 될것같음 (왜인지 오리지날엔 fp16이없다)
+        #     conditioning = conditioning.to(weight_dtype)
+        #     pool2 = pool2.to(weight_dtype)
         hidden_states1, hidden_states2 = torch.split(conditioning, [768, 1280], dim=-1)
     else:
         # input_ids: b,n,77 -> b*n, 77
