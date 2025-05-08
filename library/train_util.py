@@ -2645,6 +2645,7 @@ def cache_batch_text_encoder_outputs(
             text_encoders[0],
             text_encoders[1],
             dtype,
+            captions=info.caption
         )
 
         # ここでcpuに移動しておかないと、上書きされてしまう
@@ -5027,6 +5028,7 @@ def pool_workaround(
 
     return pooled_output
 
+compel = None
 
 def get_hidden_states_sdxl(
     max_token_length: int,
@@ -5038,59 +5040,79 @@ def get_hidden_states_sdxl(
     text_encoder2: CLIPTextModelWithProjection,
     weight_dtype: Optional[str] = None,
     accelerator: Optional[Accelerator] = None,
+    captions : Optional[str] = None
 ):
-    # input_ids: b,n,77 -> b*n, 77
-    b_size = input_ids1.size()[0]
-    input_ids1 = input_ids1.reshape((-1, tokenizer1.model_max_length))  # batch_size*n, 77
-    input_ids2 = input_ids2.reshape((-1, tokenizer2.model_max_length))  # batch_size*n, 77
+    if captions:
+        global compel
+        if compel is None:
+            from compel import Compel, ReturnedEmbeddingsType
+            compel = Compel(
+                tokenizer=[tokenizer1, tokenizer2] ,
+                text_encoder=[text_encoder1 if accelerator is None else accelerator.unwrap_model(text_encoder1), text_encoder2 if accelerator is None else accelerator.unwrap_model(text_encoder2)],
+                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                requires_pooled=[False, True],
+                truncate_long_prompts=False
+            )
+        conditioning, pooled = compel(captions)
+        conditioning = conditioning.to(accelerator.device if accelerator else text_encoder1.device)
+        pool2 = pooled.to(accelerator.device if accelerator else text_encoder1.device)
+        if weight_dtype is not None:
+            conditioning = conditioning.to(weight_dtype)
+            pool2 = pool2.to(weight_dtype)
+        hidden_states1, hidden_states2 = torch.split(conditioning, [768, 1280], dim=-1)
+    else:
+        # input_ids: b,n,77 -> b*n, 77
+        b_size = input_ids1.size()[0]
+        input_ids1 = input_ids1.reshape((-1, tokenizer1.model_max_length))  # batch_size*n, 77
+        input_ids2 = input_ids2.reshape((-1, tokenizer2.model_max_length))  # batch_size*n, 77
 
-    # text_encoder1
-    enc_out = text_encoder1(input_ids1, output_hidden_states=True, return_dict=True)
-    hidden_states1 = enc_out["hidden_states"][-2]
+        # text_encoder1
+        enc_out = text_encoder1(input_ids1, output_hidden_states=True, return_dict=True)
+        hidden_states1 = enc_out["hidden_states"][-2]
 
-    # text_encoder2
-    enc_out = text_encoder2(input_ids2, output_hidden_states=True, return_dict=True)
-    hidden_states2 = enc_out["hidden_states"][-2]  # penuultimate layer
+        # text_encoder2
+        enc_out = text_encoder2(input_ids2, output_hidden_states=True, return_dict=True)
+        hidden_states2 = enc_out["hidden_states"][-2]  # penuultimate layer
 
-    # pool2 = enc_out["text_embeds"]
-    unwrapped_text_encoder2 = text_encoder2 if accelerator is None else accelerator.unwrap_model(text_encoder2)
-    pool2 = pool_workaround(unwrapped_text_encoder2, enc_out["last_hidden_state"], input_ids2, tokenizer2.eos_token_id)
+        # pool2 = enc_out["text_embeds"]
+        unwrapped_text_encoder2 = text_encoder2 if accelerator is None else accelerator.unwrap_model(text_encoder2)
+        pool2 = pool_workaround(unwrapped_text_encoder2, enc_out["last_hidden_state"], input_ids2, tokenizer2.eos_token_id)
 
-    # b*n, 77, 768 or 1280 -> b, n*77, 768 or 1280
-    n_size = 1 if max_token_length is None else max_token_length // 75
-    hidden_states1 = hidden_states1.reshape((b_size, -1, hidden_states1.shape[-1]))
-    hidden_states2 = hidden_states2.reshape((b_size, -1, hidden_states2.shape[-1]))
+        # b*n, 77, 768 or 1280 -> b, n*77, 768 or 1280
+        n_size = 1 if max_token_length is None else max_token_length // 75
+        hidden_states1 = hidden_states1.reshape((b_size, -1, hidden_states1.shape[-1]))
+        hidden_states2 = hidden_states2.reshape((b_size, -1, hidden_states2.shape[-1]))
 
-    if max_token_length is not None:
-        # bs*3, 77, 768 or 1024
-        # encoder1: <BOS>...<EOS> の三連を <BOS>...<EOS> へ戻す
-        states_list = [hidden_states1[:, 0].unsqueeze(1)]  # <BOS>
-        for i in range(1, max_token_length, tokenizer1.model_max_length):
-            states_list.append(hidden_states1[:, i : i + tokenizer1.model_max_length - 2])  # <BOS> の後から <EOS> の前まで
-        states_list.append(hidden_states1[:, -1].unsqueeze(1))  # <EOS>
-        hidden_states1 = torch.cat(states_list, dim=1)
+        if max_token_length is not None:
+            # bs*3, 77, 768 or 1024
+            # encoder1: <BOS>...<EOS> の三連を <BOS>...<EOS> へ戻す
+            states_list = [hidden_states1[:, 0].unsqueeze(1)]  # <BOS>
+            for i in range(1, max_token_length, tokenizer1.model_max_length):
+                states_list.append(hidden_states1[:, i : i + tokenizer1.model_max_length - 2])  # <BOS> の後から <EOS> の前まで
+            states_list.append(hidden_states1[:, -1].unsqueeze(1))  # <EOS>
+            hidden_states1 = torch.cat(states_list, dim=1)
 
-        # v2: <BOS>...<EOS> <PAD> ... の三連を <BOS>...<EOS> <PAD> ... へ戻す　正直この実装でいいのかわからん
-        states_list = [hidden_states2[:, 0].unsqueeze(1)]  # <BOS>
-        for i in range(1, max_token_length, tokenizer2.model_max_length):
-            chunk = hidden_states2[:, i : i + tokenizer2.model_max_length - 2]  # <BOS> の後から 最後の前まで
-            # this causes an error:
-            # RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation
-            # if i > 1:
-            #     for j in range(len(chunk)):  # batch_size
-            #         if input_ids2[n_index + j * n_size, 1] == tokenizer2.eos_token_id:  # 空、つまり <BOS> <EOS> <PAD> ...のパターン
-            #             chunk[j, 0] = chunk[j, 1]  # 次の <PAD> の値をコピーする
-            states_list.append(chunk)  # <BOS> の後から <EOS> の前まで
-        states_list.append(hidden_states2[:, -1].unsqueeze(1))  # <EOS> か <PAD> のどちらか
-        hidden_states2 = torch.cat(states_list, dim=1)
+            # v2: <BOS>...<EOS> <PAD> ... の三連を <BOS>...<EOS> <PAD> ... へ戻す　正直この実装でいいのかわからん
+            states_list = [hidden_states2[:, 0].unsqueeze(1)]  # <BOS>
+            for i in range(1, max_token_length, tokenizer2.model_max_length):
+                chunk = hidden_states2[:, i : i + tokenizer2.model_max_length - 2]  # <BOS> の後から 最後の前まで
+                # this causes an error:
+                # RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation
+                # if i > 1:
+                #     for j in range(len(chunk)):  # batch_size
+                #         if input_ids2[n_index + j * n_size, 1] == tokenizer2.eos_token_id:  # 空、つまり <BOS> <EOS> <PAD> ...のパターン
+                #             chunk[j, 0] = chunk[j, 1]  # 次の <PAD> の値をコピーする
+                states_list.append(chunk)  # <BOS> の後から <EOS> の前まで
+            states_list.append(hidden_states2[:, -1].unsqueeze(1))  # <EOS> か <PAD> のどちらか
+            hidden_states2 = torch.cat(states_list, dim=1)
 
-        # pool はnの最初のものを使う
-        pool2 = pool2[::n_size]
+            # pool はnの最初のものを使う
+            pool2 = pool2[::n_size]
 
-    if weight_dtype is not None:
-        # this is required for additional network training
-        hidden_states1 = hidden_states1.to(weight_dtype)
-        hidden_states2 = hidden_states2.to(weight_dtype)
+        if weight_dtype is not None:
+            # this is required for additional network training
+            hidden_states1 = hidden_states1.to(weight_dtype)
+            hidden_states2 = hidden_states2.to(weight_dtype)
 
     return hidden_states1, hidden_states2, pool2
 

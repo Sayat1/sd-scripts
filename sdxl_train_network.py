@@ -99,13 +99,18 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
             with torch.enable_grad():
                 if args.weighted_captions:
                     #weighted_captions 처리. 단 A1111방식과는 좀 다름. (cat:1.2)이 아닌 (cat)1.2
-                    conditioning, pooled = self.compel(batch["captions"])
-                    conditioning = conditioning.to(accelerator.device).to(weight_dtype)
-                    pool2 = pooled.to(accelerator.device).to(weight_dtype)
-                    encoder_hidden_states1, encoder_hidden_states2 = torch.split(conditioning, [768, 1280], dim=-1)
-                    # if encoder_hidden_states1.shape[1] != 77:
-                    #     encoder_hidden_states1 = encoder_hidden_states1.reshape((-1, 77, encoder_hidden_states1.shape[-1]))
-                    #     encoder_hidden_states2 = encoder_hidden_states2.reshape((-1, 77, encoder_hidden_states2.shape[-1]))
+                    encoder_hidden_states1, encoder_hidden_states2, pool2 = train_util.get_hidden_states_sdxl(
+                        args.max_token_length,
+                        input_ids1,
+                        input_ids2,
+                        tokenizers[0],
+                        tokenizers[1],
+                        text_encoders[0],
+                        text_encoders[1],
+                        None if not args.full_fp16 else weight_dtype,
+                        accelerator=accelerator,
+                        captions=batch["captions"]
+                    )
                 else:
                     input_ids1 = input_ids1.to(accelerator.device)
                     input_ids2 = input_ids2.to(accelerator.device)
