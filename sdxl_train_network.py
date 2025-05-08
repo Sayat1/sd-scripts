@@ -103,9 +103,9 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
                     conditioning = conditioning.to(accelerator.device).to(weight_dtype)
                     pool2 = pooled.to(accelerator.device).to(weight_dtype)
                     encoder_hidden_states1, encoder_hidden_states2 = torch.split(conditioning, [768, 1280], dim=-1)
-                    if encoder_hidden_states1.shape[1] != 77:
-                        encoder_hidden_states1 = encoder_hidden_states1.reshape((-1, 77, encoder_hidden_states1.shape[-1]))
-                        encoder_hidden_states2 = encoder_hidden_states2.reshape((-1, 77, encoder_hidden_states2.shape[-1]))
+                    # if encoder_hidden_states1.shape[1] != 77:
+                    #     encoder_hidden_states1 = encoder_hidden_states1.reshape((-1, 77, encoder_hidden_states1.shape[-1]))
+                    #     encoder_hidden_states2 = encoder_hidden_states2.reshape((-1, 77, encoder_hidden_states2.shape[-1]))
                 else:
                     input_ids1 = input_ids1.to(accelerator.device)
                     input_ids2 = input_ids2.to(accelerator.device)
