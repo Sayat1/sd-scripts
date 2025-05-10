@@ -1017,19 +1017,20 @@ class NetworkTrainer:
 
                     with torch.set_grad_enabled(train_text_encoder), accelerator.autocast():
                         # Get the text embedding for conditioning
-                        if args.weighted_captions:
-                            text_encoder_conds = get_weighted_text_embeddings(
-                                tokenizer,
-                                text_encoder,
-                                batch["captions"],
-                                accelerator.device,
-                                args.max_token_length // 75 if args.max_token_length else 1,
-                                clip_skip=args.clip_skip,
-                            )
-                        else:
-                            text_encoder_conds = self.get_text_cond(
-                                args, accelerator, batch, tokenizers, text_encoders, weight_dtype
-                            )
+                        # if args.weighted_captions:
+                        #     text_encoder_conds = get_weighted_text_embeddings(
+                        #         tokenizer,
+                        #         text_encoder,
+                        #         batch["captions"],
+                        #         accelerator.device,
+                        #         args.max_token_length // 75 if args.max_token_length else 1,
+                        #         clip_skip=args.clip_skip,
+                        #     )
+                        # else:
+                        #weighted_captions 은 함수 안에서 처리
+                        text_encoder_conds = self.get_text_cond(
+                            args, accelerator, batch, tokenizers, text_encoders, weight_dtype
+                        )
 
                     # Sample noise, sample a random timestep for each image, and add noise to the latents,
                     # with noise offset and/or multires noise if specified
