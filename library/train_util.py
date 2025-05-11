@@ -4267,6 +4267,10 @@ def get_optimizer(args, trainable_params):
     optimizer = None
     optimizer_class = None
 
+    if args.use_wrap_schedulefree:
+        sf_momentum = optimizer_kwargs.pop('sf_momentum',0.9)
+        sf_weight_decay_at_y = optimizer_kwargs.pop('sf_weight_decay_at',0.0)
+
     if optimizer_type == "Lion".lower():
         try:
             import lion_pytorch
@@ -4536,7 +4540,7 @@ def get_optimizer(args, trainable_params):
     if args.use_wrap_schedulefree:
         import schedulefree as sf
         print("use schedulefree wrapper")
-        optimizer = sf.ScheduleFreeWrapper(optimizer, momentum=optimizer_kwargs.get('momentum',0.9), weight_decay_at_y=optimizer_kwargs.get('weight_decay_at_y',0.0))
+        optimizer = sf.ScheduleFreeWrapper(optimizer, momentum=sf_momentum, weight_decay_at_y=sf_weight_decay_at_y)
 
     # for logging
     optimizer_name = optimizer_class.__module__ + "." + optimizer_class.__name__
