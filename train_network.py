@@ -412,9 +412,10 @@ class NetworkTrainer:
         # データセット側にも学習ステップを送信
         train_dataset_group.set_max_train_steps(args.max_train_steps)
 
-        # lr schedulerを用意する
-        #lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
-        lr_scheduler = train_util.get_lr_schedule(args, optimizer, accelerator.num_processes)
+        if not args.use_wrap_schedulefree:
+            # lr schedulerを用意する
+            #lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
+            lr_scheduler = train_util.get_lr_schedule(args, optimizer, accelerator.num_processes)
 
         # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
         if args.full_fp16:
@@ -453,7 +454,7 @@ class NetworkTrainer:
                 t_enc.text_model.embeddings.to(dtype=(weight_dtype if te_weight_dtype != weight_dtype else te_weight_dtype))
 
         # acceleratorがなんかよろしくやってくれるらしい / accelerator will do something good
-        use_schedule_free_optimizer = args.optimizer_type.lower().endswith("schedulefree")
+        use_schedule_free_optimizer = args.optimizer_type.lower().endswith("schedulefree") or args.use_wrap_schedulefree
         if args.deepspeed:
             ds_model = deepspeed_utils.prepare_deepspeed_model(
                 args,
@@ -462,7 +463,9 @@ class NetworkTrainer:
                 text_encoder2=text_encoders[1] if train_text_encoder and len(text_encoders) > 1 and train_text_encoder[1] else None,
                 network=network,
             )
-            ds_model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(ds_model, optimizer, train_dataloader, lr_scheduler)
+            ds_model, optimizer, train_dataloader = accelerator.prepare(ds_model, optimizer, train_dataloader)
+            if not args.use_wrap_schedulefree:
+                lr_scheduler = accelerator.prepare(lr_scheduler)
             training_model = ds_model
         else:
             if train_unet:
@@ -478,7 +481,9 @@ class NetworkTrainer:
             else:
                 pass  # if text_encoder is not trained, no need to prepare. and device and dtype are already set
 
-            network, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(network, optimizer, train_dataloader, lr_scheduler)
+            network, optimizer, train_dataloader = accelerator.prepare(network, optimizer, train_dataloader)
+            if not args.use_wrap_schedulefree:
+                lr_scheduler = accelerator.prepare(lr_scheduler)
             training_model = network
 
         # make lambda function for calling optimizer.train() and optimizer.eval() if schedule-free optimizer is used
@@ -1137,7 +1142,8 @@ class NetworkTrainer:
                     
                     #beta_warmup(optimizer, global_step, 150)
                     optimizer.step()
-                    lr_scheduler.step()
+                    if not args.use_wrap_schedulefree:
+                        lr_scheduler.step()
                     optimizer.zero_grad(set_to_none=True)
 
                 if args.scale_weight_norms:
@@ -1176,16 +1182,17 @@ class NetworkTrainer:
                 loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
                 avr_loss: float = loss_recorder.moving_average
 
-                logs = self.generate_step_logs(
-                        args, current_loss, avr_loss, lr_scheduler, lr_descriptions, keys_scaled, mean_norm, maximum_norm
-                    )
-                if args.logging_dir is not None:                    
-                    accelerator.log(logs, step=global_step)
+                if not args.use_wrap_schedulefree:
+                    logs = self.generate_step_logs(
+                            args, current_loss, avr_loss, lr_scheduler, lr_descriptions, keys_scaled, mean_norm, maximum_norm
+                        )
+                    if args.logging_dir is not None:                    
+                        accelerator.log(logs, step=global_step)
 
-                progress_bar.set_postfix(**logs)
+                    progress_bar.set_postfix(**logs)
 
-                if args.scale_weight_norms:
-                    progress_bar.set_postfix(**{**max_mean_logs, **logs})
+                    if args.scale_weight_norms:
+                        progress_bar.set_postfix(**{**max_mean_logs, **logs})
 
                 if global_step >= args.max_train_steps:
                     break

@@ -3077,6 +3077,13 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
         help="Mechanic aims to remove the need for tuning a learning rate scalar",
     )
 
+    parser.add_argument(
+        "--use_wrap_schedulefree",
+        action="store_true",
+        default=False,
+        help="use schedulefree wrapper for optimizer / schedulefreeラッパーをオプティマイザに使う",
+    )
+
     # backward compatibility
     parser.add_argument(
         "--use_8bit_adam",
@@ -4525,6 +4532,11 @@ def get_optimizer(args, trainable_params):
         from mechanic_pytorch import mechanize
         print("use mechanize")
         optimizer = mechanize(optimizer_class,s_decay=optimizer_kwargs.get("weight_decay",0.01))(trainable_params, lr=lr, **optimizer_kwargs)
+
+    if args.use_wrap_schedulefree:
+        import schedulefree as sf
+        print("use schedulefree wrapper")
+        optimizer = sf.ScheduleFreeWrapper(optimizer, momentum=optimizer_kwargs.get('momentum',0.9), weight_decay_at_y=optimizer_kwargs.get('weight_decay_at_y',0.0))
 
     # for logging
     optimizer_name = optimizer_class.__module__ + "." + optimizer_class.__name__
