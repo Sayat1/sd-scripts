@@ -5090,9 +5090,8 @@ def get_hidden_states_sdxl(
         conditioning, pooled = get_cond_from_compel(captions)
         conditioning = conditioning.to(accelerator.device if accelerator else text_encoder1.device)
         pool2 = pooled.to(accelerator.device if accelerator else text_encoder1.device)
-        # if weight_dtype is not None: #안해도 될것같음 (왜인지 오리지날엔 fp16이없다)
-        #     conditioning = conditioning.to(weight_dtype)
-        #     pool2 = pool2.to(weight_dtype)
+        if weight_dtype is not None: #안해도 될것같음 (왜인지 오리지날엔 fp16이없다)
+            conditioning = conditioning.to(weight_dtype)
         hidden_states1, hidden_states2 = torch.split(conditioning, [768, 1280], dim=-1)
     else:
         # input_ids: b,n,77 -> b*n, 77
