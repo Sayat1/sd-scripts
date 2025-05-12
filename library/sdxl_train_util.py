@@ -148,6 +148,12 @@ def _load_target_model(
             name_or_path, subfolder="unet", revision=None, variant=None, torch_dtype=torch.float16,
         )
 
+        # convert to fp32 for cache text_encoders outputs
+        if text_encoder1.dtype != torch.float32:
+            text_encoder1 = text_encoder1.to(dtype=torch.float32)
+        if text_encoder2.dtype != torch.float32:
+            text_encoder2 = text_encoder2.to(dtype=torch.float32)
+
         # Diffusers U-Net to original U-Net
         state_dict = sdxl_model_util.convert_diffusers_unet_state_dict_to_sdxl(unet.state_dict())
         with init_empty_weights():
