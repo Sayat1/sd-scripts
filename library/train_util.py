@@ -4548,6 +4548,39 @@ def lr_lambda_constant():
 
     return lr_lambda
 
+def lr_lambdaLR_cos_min(
+    optimizer: Optimizer,
+    num_warmup_steps: int,
+    num_training_steps: int,
+    num_cycles: float = 0.5,
+    last_epoch: int = -1,
+    min_lr: float = None,
+    min_lr_rate: float = None,
+):
+    from torch.optim.lr_scheduler import LambdaLR
+    from functools import partial
+    from transformers.optimization import _get_cosine_schedule_with_warmup_lr_lambda
+
+    lr_lambdas = []
+
+    for group in optimizer.param_groups:
+        if min_lr is not None and min_lr_rate is not None:
+            raise ValueError("Only one of min_lr or min_lr_rate should be set")
+        elif min_lr is not None:
+            min_lr_rate = min_lr / group["lr"]
+        elif min_lr_rate is None:
+            raise ValueError("One of min_lr or min_lr_rate should be set through the `lr_scheduler_kwargs`")
+        lr_lambda = partial(
+            _get_cosine_schedule_with_warmup_lr_lambda,
+            num_warmup_steps=num_warmup_steps,
+            num_training_steps=num_training_steps,
+            num_cycles=num_cycles,
+            min_lr_rate=min_lr_rate,
+        )
+        lr_lambdas.append(lr_lambda)
+        
+    return LambdaLR(optimizer, lr_lambdas, last_epoch)
+
 def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
     """
     Unified API to get any scheduler from its name.
@@ -4679,7 +4712,7 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
         )
 
     if name == SchedulerType.COSINE_WITH_MIN_LR:
-        return schedule_func(
+        return lr_lambdaLR_cos_min(
             optimizer,
             num_warmup_steps=num_warmup_steps,
             num_training_steps=num_training_steps,
