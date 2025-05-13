@@ -4567,15 +4567,17 @@ def lr_lambdaLR_cos_min(
         if min_lr is not None and min_lr_rate is not None:
             raise ValueError("Only one of min_lr or min_lr_rate should be set")
         elif min_lr is not None:
-            min_lr_rate = min_lr / group["lr"]
-        elif min_lr_rate is None:
+            arg_min_lr_rate = min_lr / group["lr"]
+        elif min_lr_rate is not None:
+            arg_min_lr_rate = min_lr_rate
+        else:
             raise ValueError("One of min_lr or min_lr_rate should be set through the `lr_scheduler_kwargs`")
         lr_lambda = partial(
             _get_cosine_schedule_with_warmup_lr_lambda,
             num_warmup_steps=num_warmup_steps,
             num_training_steps=num_training_steps,
             num_cycles=num_cycles,
-            min_lr_rate=min_lr_rate,
+            min_lr_rate=arg_min_lr_rate,
         )
         lr_lambdas.append(lr_lambda)
         
