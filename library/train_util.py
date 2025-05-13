@@ -5042,8 +5042,8 @@ def get_hidden_states_sdxl(
     captions : Optional[str] = None
 ):
     if captions:
-        hidden_states1,_ = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer1,text_encoder1,captions,accelerator.device if accelerator else 'cpu',2,no_boseos_middle=True)
-        hidden_states2,pool2 = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer2,text_encoder2,captions,accelerator.device if accelerator else 'cpu',2,no_boseos_middle=True,pool_out=True)
+        hidden_states1,_ = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer1,text_encoder1,captions,accelerator.device if accelerator else 'cpu',1 if max_token_length is None else max_token_length//75,no_boseos_middle=True)
+        hidden_states2,pool2 = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer2,text_encoder2,captions,accelerator.device if accelerator else 'cpu',1 if max_token_length is None else max_token_length//75,no_boseos_middle=True,pool_out=True)
         if weight_dtype is not None:
             hidden_states1 = hidden_states1.to(dtype=weight_dtype)
             hidden_states2 = hidden_states2.to(dtype=weight_dtype)
