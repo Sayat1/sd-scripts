@@ -31,7 +31,6 @@ import subprocess
 import inspect
 from io import BytesIO
 import toml
-from compel import Compel, ReturnedEmbeddingsType
 
 from tqdm import tqdm
 
