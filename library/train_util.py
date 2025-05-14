@@ -3116,57 +3116,49 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument(
+        "--lr_scheduler_args_te1",
+        type=str,
+        default=None,
+        nargs="*",
+        help='additional arguments for scheduler for te1(like "T_max=100") / スケジューラの追加引数（例： "T_max100"）',
+    )
+
+    parser.add_argument(
+        "--lr_scheduler_args_te2",
+        type=str,
+        default=None,
+        nargs="*",
+        help='additional arguments for scheduler for te2(like "T_max=100") / スケジューラの追加引数（例： "T_max100"）',
+    )
+
+    parser.add_argument(
         "--lr_scheduler",
         type=str,
         default="constant",
         help="scheduler to use for learning rate / 学習率のスケジューラ: linear, cosine, cosine_with_restarts, polynomial, constant (default), constant_with_warmup, adafactor",
     )
+
     parser.add_argument(
-        "--lr_warmup_steps",
-        type=int_or_float,
-        default=0,
-        help="Int number of steps for the warmup in the lr scheduler (default is 0) or float with ratio of train steps"
-        " / 学習率のスケジューラをウォームアップするステップ数（デフォルト0）、または学習ステップの比率（1未満のfloat値の場合）",
+        "--lr_scheduler_te1",
+        type=str,
+        default="constant",
+        help="scheduler to use for learning rate for te1/ 学習率のスケジューラ: linear, cosine, cosine_with_restarts, polynomial, constant (default), constant_with_warmup, adafactor",
     )
+
     parser.add_argument(
-        "--lr_decay_steps",
-        type=int_or_float,
-        default=0,
-        help="Int number of steps for the decay in the lr scheduler (default is 0) or float (<1) with ratio of train steps"
-        " / 学習率のスケジューラを減衰させるステップ数（デフォルト0）、または学習ステップの比率（1未満のfloat値の場合）",
+        "--lr_scheduler_te2",
+        type=str,
+        default="constant",
+        help="scheduler to use for learning rate for te2 / 学習率のスケジューラ: linear, cosine, cosine_with_restarts, polynomial, constant (default), constant_with_warmup, adafactor",
     )
-    parser.add_argument(
-        "--lr_scheduler_num_cycles",
-        type=int,
-        default=1,
-        help="Number of restarts for cosine scheduler with restarts / cosine with restartsスケジューラでのリスタート回数",
-    )
-    parser.add_argument(
-        "--lr_scheduler_power",
-        type=float,
-        default=1,
-        help="Polynomial power for polynomial scheduler / polynomialスケジューラでのpolynomial power",
-    )
+
     parser.add_argument(
         "--fused_backward_pass",
         action="store_true",
         help="Combines backward pass and optimizer step to reduce VRAM usage. Only available in SDXL"
         + " / バックワードパスとオプティマイザステップを組み合わせてVRAMの使用量を削減します。SDXLでのみ有効",
     )
-    parser.add_argument(
-        "--lr_scheduler_timescale",
-        type=int,
-        default=None,
-        help="Inverse sqrt timescale for inverse sqrt scheduler,defaults to `num_warmup_steps`"
-        + " / 逆平方根スケジューラのタイムスケール、デフォルトは`num_warmup_steps`",
-    )
-    parser.add_argument(
-        "--lr_scheduler_min_lr_ratio",
-        type=float,
-        default=None,
-        help="The minimum learning rate as a ratio of the initial learning rate for cosine with min lr scheduler and warmup decay scheduler"
-        + " / 初期学習率の比率としての最小学習率を指定する、cosine with min lr と warmup decay スケジューラ で有効",
-    )
+
 
 
 def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: bool):
@@ -4586,7 +4578,7 @@ def lr_lambdaLR_cos_min(
         
     return LambdaLR(optimizer, lr_lambdas, last_epoch)
 
-def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
+def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int, optional_lr_scheduler=None, optional_lr_scheduler_args=None):
     """
     Unified API to get any scheduler from its name.
     """
@@ -4598,35 +4590,35 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
         lr_scheduler.step = lambda: None
         return lr_scheduler
 
-    name = args.lr_scheduler
+    name = args.lr_scheduler if optional_lr_scheduler is None else optional_lr_scheduler
     num_training_steps = args.max_train_steps * num_processes  # * args.gradient_accumulation_steps
-    num_warmup_steps: Optional[int] = (
-        int(args.lr_warmup_steps * num_training_steps) if isinstance(args.lr_warmup_steps, float) else args.lr_warmup_steps
-    )
-    num_decay_steps: Optional[int] = (
-        int(args.lr_decay_steps * num_training_steps) if isinstance(args.lr_decay_steps, float) else args.lr_decay_steps
-    )
-    num_stable_steps = num_training_steps - num_warmup_steps - num_decay_steps
-    num_cycles = args.lr_scheduler_num_cycles
-    power = args.lr_scheduler_power
-    timescale = args.lr_scheduler_timescale
-    min_lr_ratio = args.lr_scheduler_min_lr_ratio
+    num_warmup_steps = 0
+    num_decay_steps = 0
+    num_cycles = 1
+    power = 1
+    timescale = None
+    min_lr_ratio = None
 
     lr_scheduler_kwargs = {}  # get custom lr_scheduler kwargs
-    if args.lr_scheduler_args is not None and len(args.lr_scheduler_args) > 0:
-        for arg in args.lr_scheduler_args:
+    lr_scheduler_args = args.lr_scheduler_args if optional_lr_scheduler_args is None else optional_lr_scheduler_args
+    if lr_scheduler_args is not None and lr_scheduler_args != "none":
+        for arg in lr_scheduler_args:
             key, value = arg.split("=")
-            if value=="%TRAIN_STEPS%":
-                value = num_training_steps-num_warmup_steps
-            else:
-                try:
-                    value = ast.literal_eval(value)
-                except ValueError:
-                    value = value
+            try:
+                value = ast.literal_eval(value)
+            except ValueError:
+                value = value
+
             if key == "min_lr_ratio":
                 min_lr_ratio = value
                 continue
-            elif key == "num_cycles":
+            elif key == "warmup":
+                num_warmup_steps = (int(value * num_training_steps) if isinstance(value, float) else value)
+                continue
+            elif key == "decay":
+                num_decay_steps = (int(value * num_training_steps) if isinstance(value, float) else value)
+                continue
+            elif key == "cycles":
                 num_cycles = value
                 continue
             elif key == "power":
@@ -4636,6 +4628,12 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
                 timescale = value
                 continue
             lr_scheduler_kwargs[key] = value
+        
+        for key , value in lr_scheduler_kwargs.item():
+            if value == "%TRAIN_STEPS%":
+                value = num_training_steps-num_warmup_steps
+
+    num_stable_steps = num_training_steps - num_warmup_steps - num_decay_steps
 
     def wrap_check_needless_num_warmup_steps(return_vals):
         if num_warmup_steps is not None and num_warmup_steps != 0:
@@ -4756,6 +4754,21 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
         num_decay_steps=num_decay_steps,
         **lr_scheduler_kwargs,
     )
+
+def get_lr_scheduler(args, optimizer, num_processes, train_text_encoders:List[bool]):
+    from torch.optim.lr_scheduler import LambdaLR
+    optional_te_schedulers = [args.lr_scheduler_te1, args.lr_scheduler_te2]
+    optional_te_args = [args.lr_scheduler_args_te1, args.lr_scheduler_args_te2]
+    schedulers = []
+    for train_te,opt_scheduler,opt_args in zip(train_text_encoders,optional_te_schedulers,optional_te_args,strict=True):
+        if train_te:
+            schedulers.append(get_scheduler_fix(args,optimizer,num_processes,opt_scheduler,opt_args))
+
+    schedulers.append(get_scheduler_fix(args,optimizer,num_processes))
+
+    lr_lambas = [scheduler.lr_lambdas[0] if type(scheduler) == LambdaLR else scheduler for scheduler in schedulers]
+
+    return LambdaLR(optimizer=optimizer,lr_lambda=lr_lambas,last_epoch=args.lr_scheduler_args.get('last_epoch',-1))
 
 
 def prepare_dataset_args(args: argparse.Namespace, support_metadata: bool):

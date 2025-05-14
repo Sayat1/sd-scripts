@@ -417,8 +417,8 @@ class NetworkTrainer:
         # データセット側にも学習ステップを送信
         train_dataset_group.set_max_train_steps(args.max_train_steps)
 
-        # lr schedulerを用意する
-        lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
+        # lr scheduler 그룹마다 따로
+        lr_scheduler = train_util.get_lr_scheduler(args, optimizer, accelerator.num_processes, train_text_encoders)
 
         # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
         if args.full_fp16:
