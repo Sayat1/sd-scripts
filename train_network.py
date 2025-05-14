@@ -92,6 +92,9 @@ class NetworkTrainer:
                         logs[f"lr/effective_lr/{lr_desc}"] = (
                             lr_scheduler.optimizer.param_groups[i]["effective_lr"]
                         )
+                        logs[f"lr/d*effective_lr/{lr_desc}"] = (
+                            lr_scheduler.optimizer.param_groups[i]["d"] * lr_scheduler.optimizer.param_groups[i]["effective_lr"]
+                        )
                     logs[f"lr/d*lr/{lr_desc}"] = (
                         lr_scheduler.optimizer.param_groups[i]["d"] * lr_scheduler.optimizer.param_groups[i]["lr"]
                     )
