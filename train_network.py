@@ -617,8 +617,12 @@ class NetworkTrainer:
             "ss_gradient_checkpointing": args.gradient_checkpointing,
             "ss_gradient_accumulation_steps": args.gradient_accumulation_steps,
             "ss_max_train_steps": args.max_train_steps,
-            "ss_lr_warmup_steps": args.lr_warmup_steps,
             "ss_lr_scheduler": args.lr_scheduler,
+            "ss_lr_scheduler_te1": args.lr_scheduler_te1,
+            "ss_lr_scheduler_te2": args.lr_scheduler_te2,
+            "ss_lr_scheduler_args": args.lr_scheduler_args,
+            "ss_lr_scheduler_args_te1": args.lr_scheduler_args_te1,
+            "ss_lr_scheduler_args_te2": args.lr_scheduler_args_te2,
             "ss_network_module": args.network_module,
             "ss_network_dim": args.network_dim,  # None means default because another network than LoRA may have another default dim
             "ss_network_alpha": args.network_alpha,  # some networks may not have alpha

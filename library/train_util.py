@@ -4556,27 +4556,23 @@ def lr_lambdaLR_cos_min(
     from functools import partial
     from transformers.optimization import _get_cosine_schedule_with_warmup_lr_lambda
 
-    lr_lambdas = []
-
-    for group in optimizer.param_groups:
-        if min_lr is not None and min_lr_rate is not None:
-            raise ValueError("Only one of min_lr or min_lr_rate should be set")
-        elif min_lr is not None:
-            arg_min_lr_rate = min_lr / group["lr"]
-        elif min_lr_rate is not None:
-            arg_min_lr_rate = min_lr_rate
-        else:
-            raise ValueError("One of min_lr or min_lr_rate should be set through the `lr_scheduler_kwargs`")
-        lr_lambda = partial(
-            _get_cosine_schedule_with_warmup_lr_lambda,
-            num_warmup_steps=num_warmup_steps,
-            num_training_steps=num_training_steps,
-            num_cycles=num_cycles,
-            min_lr_rate=arg_min_lr_rate,
-        )
-        lr_lambdas.append(lr_lambda)
+    if min_lr is not None and min_lr_rate is not None:
+        raise ValueError("Only one of min_lr or min_lr_rate should be set")
+    elif min_lr is not None:
+        arg_min_lr_rate = min_lr / optimizer.defaults["lr"]
+    elif min_lr_rate is not None:
+        arg_min_lr_rate = min_lr_rate
+    else:
+        raise ValueError("One of min_lr or min_lr_rate should be set through the `lr_scheduler_kwargs`")
+    lr_lambda = partial(
+        _get_cosine_schedule_with_warmup_lr_lambda,
+        num_warmup_steps=num_warmup_steps,
+        num_training_steps=num_training_steps,
+        num_cycles=num_cycles,
+        min_lr_rate=arg_min_lr_rate,
+    )
         
-    return LambdaLR(optimizer, lr_lambdas, last_epoch)
+    return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int, optional_lr_scheduler=None, optional_lr_scheduler_args=None):
     """
@@ -4768,8 +4764,8 @@ def get_lr_scheduler(args, optimizer, num_processes, train_text_encoders:List[bo
     schedulers.append(get_scheduler_fix(args,optimizer,num_processes))
 
     lr_lambas = [scheduler.lr_lambdas[i] if type(scheduler) == LambdaLR else scheduler for i,scheduler in enumerate(schedulers)]
-
-    return LambdaLR(optimizer=optimizer,lr_lambda=lr_lambas,last_epoch=args.lr_scheduler_args.get('last_epoch',-1))
+    last_epoch = -1 if schedulers[-1].last_epoch==0 else schedulers[-1].last_epoch
+    return LambdaLR(optimizer=optimizer,lr_lambda=lr_lambas,last_epoch=last_epoch)
 
 
 def prepare_dataset_args(args: argparse.Namespace, support_metadata: bool):
