@@ -4629,9 +4629,10 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int, optional_l
                 continue
             lr_scheduler_kwargs[key] = value
         
-        for key , value in lr_scheduler_kwargs.item():
+        for key , value in lr_scheduler_kwargs.items():
             if value == "%TRAIN_STEPS%":
                 value = num_training_steps-num_warmup_steps
+                lr_scheduler_kwargs[key] = value
 
     num_stable_steps = num_training_steps - num_warmup_steps - num_decay_steps
 
@@ -4766,7 +4767,7 @@ def get_lr_scheduler(args, optimizer, num_processes, train_text_encoders:List[bo
 
     schedulers.append(get_scheduler_fix(args,optimizer,num_processes))
 
-    lr_lambas = [scheduler.lr_lambdas[0] if type(scheduler) == LambdaLR else scheduler for scheduler in schedulers]
+    lr_lambas = [scheduler.lr_lambdas[i] if type(scheduler) == LambdaLR else scheduler for i,scheduler in enumerate(schedulers)]
 
     return LambdaLR(optimizer=optimizer,lr_lambda=lr_lambas,last_epoch=args.lr_scheduler_args.get('last_epoch',-1))
 
