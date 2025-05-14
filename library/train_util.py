@@ -4559,11 +4559,15 @@ def lr_lambdaLR_cos_min(
     if min_lr is not None and min_lr_rate is not None:
         raise ValueError("Only one of min_lr or min_lr_rate should be set")
     elif min_lr is not None:
-        arg_min_lr_rate = min_lr / optimizer.defaults["lr"]
+        raise ValueError("Use min_lr_rate=target_lr/current_lr instead of min_lr")
     elif min_lr_rate is not None:
         arg_min_lr_rate = min_lr_rate
     else:
         raise ValueError("One of min_lr or min_lr_rate should be set through the `lr_scheduler_kwargs`")
+    
+    if type(arg_min_lr_rate)==str:
+        arg_min_lr_rate = eval(arg_min_lr_rate)
+
     lr_lambda = partial(
         _get_cosine_schedule_with_warmup_lr_lambda,
         num_warmup_steps=num_warmup_steps,
