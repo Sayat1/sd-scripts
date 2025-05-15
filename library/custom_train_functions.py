@@ -389,6 +389,8 @@ def get_unweighted_text_embeddings_sdxl(
     When the length of tokens is a multiple of the capacity of the text encoder,
     it should be split into chunks and sent to the text encoder individually.
     """
+    if pool_out:
+        from library.train_util import pool_workaround
     pool2 = None
     max_embeddings_multiples = (text_input.shape[1] - 2) // (chunk_length - 2)
 
@@ -426,10 +428,7 @@ def get_unweighted_text_embeddings_sdxl(
                     text_embedding = text_embedding[:, 1:-1]
 
             if pool_out:
-                if hasattr(enc_out, "text_embeds"):
-                    pool = enc_out["text_embeds"]
-                if hasattr(enc_out, "pooler_output"):
-                    pool = enc_out["pooler_output"]
+                pool = pool_workaround(text_encoder, enc_out["last_hidden_state"], text_input_chunk, eos)
                 pools.append(pool)
 
             text_embeddings.append(text_embedding)
@@ -444,12 +443,8 @@ def get_unweighted_text_embeddings_sdxl(
         enc_out = text_encoder(text_input, output_hidden_states=True, return_dict=True)
         text_embeddings = enc_out["hidden_states"][-2]
         if pool_out:
-            if hasattr(enc_out, "text_embeds"):
-                pool2 = enc_out["text_embeds"]
-            if hasattr(enc_out, "pooler_output"):
-                pool2 = enc_out["pooler_output"]
-            #from library.train_util import pool_workaround
-            #pool2 = pool_workaround(text_encoder, enc_out["last_hidden_state"], text_input, eos)
+            pool2 = pool_workaround(text_encoder, enc_out["last_hidden_state"], text_input, eos)
+
     return text_embeddings, pool2
 
 def get_weighted_text_embeddings(
@@ -533,6 +528,19 @@ def get_weighted_text_embeddings(
 
     return text_embeddings
 
+def gen_empty_tokens(bos,eos,pad, length):
+    start_token = bos
+    end_token = eos
+    pad_token = pad
+    output = []
+    if start_token is not None:
+        output.append(start_token)
+    if end_token is not None:
+        output.append(end_token)
+    output += [pad_token] * (length - len(output))
+    return output
+
+
 @torch.enable_grad()
 def get_weighted_text_embeddings_sdxl(
     tokenizer,
@@ -567,8 +575,8 @@ def get_weighted_text_embeddings_sdxl(
     if isinstance(prompt, str):
         prompt = [prompt]
 
+    use_prompt_weighting = False
     prompt_tokens, prompt_weights = get_prompts_with_weights(tokenizer, prompt, max_length - 2)
-
     # round up the longest length of tokens to a multiple of (model_max_length - 2)
     max_length = max([len(token) for token in prompt_tokens])
 
@@ -593,7 +601,14 @@ def get_weighted_text_embeddings_sdxl(
         no_boseos_middle=no_boseos_middle,
         chunk_length=tokenizer.model_max_length,
     )
+
     prompt_tokens = torch.tensor(prompt_tokens, dtype=torch.long, device=device)
+
+    if any([weight != 1.0 for weight in prompt_weights]):
+        use_prompt_weighting=True
+        empty_tokens = torch.tensor(gen_empty_tokens(bos,eos,pad,prompt_tokens.shape[-1])).unsqueeze(0)
+        prompt_tokens = torch.cat([prompt_tokens,empty_tokens],dim=0)
+
     # get the embeddings
     text_embeddings, pool = get_unweighted_text_embeddings_sdxl(
         tokenizer,
@@ -605,13 +620,14 @@ def get_weighted_text_embeddings_sdxl(
         no_boseos_middle=no_boseos_middle,
         pool_out=pool_out,
     )
-    prompt_weights = torch.tensor(prompt_weights, dtype=text_embeddings.dtype, device=device)
-
-    # assign weights to the prompts and normalize in the sense of mean
-    previous_mean = text_embeddings.float().mean(axis=[-2, -1]).to(text_embeddings.dtype)
-    text_embeddings = text_embeddings * prompt_weights.unsqueeze(-1)
-    current_mean = text_embeddings.float().mean(axis=[-2, -1]).to(text_embeddings.dtype)
-    text_embeddings = text_embeddings * (previous_mean / current_mean).unsqueeze(-1).unsqueeze(-1)
+    
+    if use_prompt_weighting:
+        prompt_weights = torch.tensor(prompt_weights, dtype=text_embeddings.dtype, device=device)
+        empty_embeddings = text_embeddings[-1]
+        text_embeddings = text_embeddings[:-1]
+        if pool is not None:
+            pool = pool[:-1]
+        text_embeddings = empty_embeddings + (text_embeddings - empty_embeddings) * prompt_weights.unsqueeze(-1)
 
     return text_embeddings, pool
 
