@@ -606,7 +606,7 @@ def get_weighted_text_embeddings_sdxl(
 
     if any([weight != 1.0 for weight in prompt_weights]):
         use_prompt_weighting=True
-        empty_tokens = torch.tensor(gen_empty_tokens(bos,eos,pad,prompt_tokens.shape[-1])).unsqueeze(0)
+        empty_tokens = torch.tensor(gen_empty_tokens(bos,eos,pad,prompt_tokens.shape[-1]), device=device).unsqueeze(0)
         prompt_tokens = torch.cat([prompt_tokens,empty_tokens],dim=0)
 
     # get the embeddings
