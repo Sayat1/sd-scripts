@@ -4790,14 +4790,20 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int, optional_l
 
 def get_lr_scheduler(args, optimizer, num_processes, train_text_encoders:List[bool]):
     from torch.optim.lr_scheduler import LambdaLR
-    optional_te_schedulers = [args.lr_scheduler_te1, args.lr_scheduler_te2]
-    optional_te_args = [args.lr_scheduler_args_te1, args.lr_scheduler_args_te2]
     schedulers = []
-    for train_te,opt_scheduler,opt_args in zip(train_text_encoders,optional_te_schedulers,optional_te_args,strict=True):
-        if train_te:
-            schedulers.append(get_scheduler_fix(args,optimizer,num_processes,opt_scheduler,opt_args))
+    if args.lr_tb_file:
+        df = convert_tb_data(args.lr_tb_file)
+        schedulers.append(lr_from_tb(df,"lr/d*lr/textencoder 1"))
+        schedulers.append(lr_from_tb(df,"lr/d*lr/textencoder 2"))
+        schedulers.append(lr_from_tb(df,"lr/d*lr/unet"))
+    else:
+        optional_te_schedulers = [args.lr_scheduler_te1, args.lr_scheduler_te2]
+        optional_te_args = [args.lr_scheduler_args_te1, args.lr_scheduler_args_te2]
+        for train_te,opt_scheduler,opt_args in zip(train_text_encoders,optional_te_schedulers,optional_te_args,strict=True):
+            if train_te:
+                schedulers.append(get_scheduler_fix(args,optimizer,num_processes,opt_scheduler,opt_args))
 
-    schedulers.append(get_scheduler_fix(args,optimizer,num_processes))
+        schedulers.append(get_scheduler_fix(args,optimizer,num_processes))
 
     lr_lambas = [scheduler.lr_lambdas[i] if type(scheduler) == LambdaLR else scheduler for i,scheduler in enumerate(schedulers)]
     last_epoch = -1 if schedulers[-1].last_epoch==0 else schedulers[-1].last_epoch
@@ -4828,59 +4834,6 @@ def convert_tb_data(filepath):
     all_df = out[columns_order]
         
     return all_df.reset_index(drop=True)
-
-def lr_lambda_cosine_cycle_start_zero(
-    current_step: int, *, num_training_steps: int, num_cycles: float, min_lr_rate: float = 0.0
-):
-    progress = float(current_step) / float(max(1, num_training_steps))
-    factor = 0.5 * (1.0 - math.cos(math.pi * float(num_cycles) * 2 * progress))
-    factor = factor * (1 - min_lr_rate) + min_lr_rate
-    return max(0, factor)
-
-def lr_from_tb(df:pd.DataFrame,column_name:str):
-    group_df = df[df['name'] == column_name]
-    init_lr = group_df['value'].iloc[0]
-    changed = group_df[group_df['value'] != group_df['value'].shift(1)]
-    def lr_lambda(current_step:int):
-        try:
-            return changed[changed['step'] <= current_step]['value'].iloc[-1]
-        except IndexError:
-            return init_lr
-    return lr_lambda
-
-def get_lr_schedule(args, optimizer, num_processes):
-    from torch.optim.lr_scheduler import LambdaLR,SequentialLR
-    num_training_steps = args.max_train_steps * num_processes
-    if args.lr_tb_file:
-        df = convert_tb_data(args.lr_tb_file)
-        lr_scheduler1 = lr_from_tb(df,"lr/d*lr/textencoder 1")
-        lr_scheduler2 = lr_from_tb(df,"lr/d*lr/textencoder 2")
-        lr_scheduler3 = lr_from_tb(df,"lr/d*lr/unet")
-    else:
-        from functools import partial
-
-        args.lr_scheduler = "constant_with_warmup"
-        args.lr_warmup_steps = 15
-        lr_scheduler1 = lr_lambda_warmup(args.lr_warmup_steps, lr_lambda_constant())
-
-        args.lr_scheduler = "constant_with_warmup"
-        args.lr_warmup_steps = 150
-        lr_scheduler2 = lr_lambda_warmup(args.lr_warmup_steps, lr_lambda_constant())
-
-        lr_scheduler3 = partial(lr_lambda_cosine_cycle_start_zero,
-            num_training_steps=num_training_steps,
-            num_cycles=5,
-            min_lr_rate=0.01)
-
-    return LambdaLR(optimizer=optimizer,
-                    lr_lambda=[
-                        lr_scheduler1.lr_lambdas[0] if type(lr_scheduler1) == LambdaLR else lr_scheduler1,
-                        lr_scheduler2.lr_lambdas[0] if type(lr_scheduler2) == LambdaLR else lr_scheduler2,
-                        lr_scheduler3.lr_lambdas[0] if type(lr_scheduler3) == LambdaLR else lr_scheduler3
-                        ],
-                    last_epoch=-1
-                    )
-
 
 def prepare_dataset_args(args: argparse.Namespace, support_metadata: bool):
     # backward compatibility
