@@ -2,8 +2,10 @@ import torch
 import argparse
 import random
 import re
+from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 from typing import List, Optional, Union
 from .utils import setup_logging
+
 
 setup_logging()
 import logging
@@ -282,15 +284,18 @@ def get_prompts_with_weights(tokenizer, prompt: List[str], max_length: int):
         logger.warning("Prompt was truncated. Try to shorten the prompt or increase max_embeddings_multiples")
     return tokens, weights
 
-
-def pad_tokens_and_weights(tokens, weights, max_length, bos, eos, no_boseos_middle=True, chunk_length=77):
+@torch.enable_grad()
+def pad_tokens_and_weights(tokens, weights, max_length, bos, eos, pad, no_boseos_middle=True, chunk_length=77):
     r"""
     Pad the tokens (with starting and ending tokens) and weights (with 1.0) to max_length.
     """
     max_embeddings_multiples = (max_length - 2) // (chunk_length - 2)
     weights_length = max_length if no_boseos_middle else max_embeddings_multiples * chunk_length
     for i in range(len(tokens)):
-        tokens[i] = [bos] + tokens[i] + [eos] * (max_length - 1 - len(tokens[i]))
+        if eos == pad:  # v1
+            tokens[i] = [bos] + tokens[i] + [eos] * (max_length - 1 - len(tokens[i]))
+        else:  # v2
+            tokens[i] = [bos] + tokens[i] + [eos] + [pad] * (max_length - 2 - len(tokens[i]))
         if no_boseos_middle:
             weights[i] = [1.0] + weights[i] + [1.0] * (max_length - 1 - len(weights[i]))
         else:
@@ -369,6 +374,78 @@ def get_unweighted_text_embeddings(
             text_embeddings = text_encoder.text_model.final_layer_norm(text_embeddings)
     return text_embeddings
 
+@torch.enable_grad()
+def get_unweighted_text_embeddings_sdxl(
+    tokenizer,
+    text_encoder,
+    text_input: torch.Tensor,
+    chunk_length: int,
+    eos: int,
+    pad: int,
+    no_boseos_middle: Optional[bool] = True,
+    pool_out: Optional[bool] = False,
+):
+    """
+    When the length of tokens is a multiple of the capacity of the text encoder,
+    it should be split into chunks and sent to the text encoder individually.
+    """
+    if pool_out:
+        from library.train_util import pool_workaround
+    pool2 = None
+    max_embeddings_multiples = (text_input.shape[1] - 2) // (chunk_length - 2)
+
+    if max_embeddings_multiples > 1:
+        text_embeddings = []
+        if pool_out:
+            pools = []
+        for i in range(max_embeddings_multiples):
+            # extract the i-th chunk
+            text_input_chunk = text_input[:, i * (chunk_length - 2) : (i + 1) * (chunk_length - 2) + 2].clone()
+
+            # cover the head and the tail by the starting and the ending tokens
+            text_input_chunk[:, 0] = text_input[0, 0]
+            if pad == eos:  # v1
+                text_input_chunk[:, -1] = text_input[0, -1]
+            else:  # v2
+                for j in range(len(text_input_chunk)):
+                    if text_input_chunk[j, -1] != eos and text_input_chunk[j, -1] != pad:  # 最後に普通の文字がある
+                        text_input_chunk[j, -1] = eos
+                    if text_input_chunk[j, 1] == pad:  # BOSだけであとはPAD
+                        text_input_chunk[j, 1] = eos
+
+            enc_out = text_encoder(text_input_chunk, output_hidden_states=True, return_dict=True)
+            text_embedding = enc_out["hidden_states"][-2]
+
+            if no_boseos_middle:
+                if i == 0:
+                    # discard the ending token
+                    text_embedding = text_embedding[:, :-1]
+                elif i == max_embeddings_multiples - 1:
+                    # discard the starting token
+                    text_embedding = text_embedding[:, 1:]
+                else:
+                    # discard both starting and ending tokens
+                    text_embedding = text_embedding[:, 1:-1]
+
+            if pool_out:
+                pool = pool_workaround(text_encoder, enc_out["last_hidden_state"], text_input_chunk, eos)
+                pools.append(pool)
+
+            text_embeddings.append(text_embedding)
+        text_embeddings = torch.concat(text_embeddings, axis=1)
+        if pool_out:
+            pool2 = torch.concat(pools, axis=1)
+            slice_dim = pool2.size(1) // max_embeddings_multiples 
+            pool2 = pool2[:, :slice_dim]  
+            #pool2 = pool2[::max_embeddings_multiples]
+        
+    else:
+        enc_out = text_encoder(text_input, output_hidden_states=True, return_dict=True)
+        text_embeddings = enc_out["hidden_states"][-2]
+        if pool_out:
+            pool2 = pool_workaround(text_encoder, enc_out["last_hidden_state"], text_input, eos)
+
+    return text_embeddings, pool2
 
 def get_weighted_text_embeddings(
     tokenizer,
@@ -451,6 +528,108 @@ def get_weighted_text_embeddings(
 
     return text_embeddings
 
+def gen_empty_tokens(bos,eos,pad, length):
+    start_token = bos
+    end_token = eos
+    pad_token = pad
+    output = []
+    if start_token is not None:
+        output.append(start_token)
+    if end_token is not None:
+        output.append(end_token)
+    output += [pad_token] * (length - len(output))
+    return output
+
+
+@torch.enable_grad()
+def get_weighted_text_embeddings_sdxl(
+    tokenizer,
+    text_encoder,
+    prompt: Union[str, List[str]],
+    device,
+    max_embeddings_multiples: Optional[int] = 1,
+    no_boseos_middle: Optional[bool] = True,
+    pool_out: Optional[bool] = False,
+):
+    r"""
+    Prompts can be assigned with local weights using brackets. For example,
+    prompt 'A (very beautiful) masterpiece' highlights the words 'very beautiful',
+    and the embedding tokens corresponding to the words get multiplied by a constant, 1.1.
+
+    Also, to regularize of the embedding, the weighted embedding would be scaled to preserve the original mean.
+
+    Args:
+        prompt (`str` or `List[str]`):
+            The prompt or prompts to guide the image generation.
+        max_embeddings_multiples (`int`, *optional*, defaults to `3`):
+            The max multiple length of prompt embeddings compared to the max output length of text encoder.
+        no_boseos_middle (`bool`, *optional*, defaults to `False`):
+            If the length of text token is multiples of the capacity of text encoder, whether reserve the starting and
+            ending token in each of the chunk in the middle.
+        skip_parsing (`bool`, *optional*, defaults to `False`):
+            Skip the parsing of brackets.
+        skip_weighting (`bool`, *optional*, defaults to `False`):
+            Skip the weighting. When the parsing is skipped, it is forced True.
+    """
+    max_length = (tokenizer.model_max_length - 2) * max_embeddings_multiples + 2
+    if isinstance(prompt, str):
+        prompt = [prompt]
+
+    use_prompt_weighting = False
+    prompt_tokens, prompt_weights = get_prompts_with_weights(tokenizer, prompt, max_length - 2)
+    # round up the longest length of tokens to a multiple of (model_max_length - 2)
+    max_length = max([len(token) for token in prompt_tokens])
+
+    max_embeddings_multiples = min(
+        max_embeddings_multiples,
+        (max_length - 1) // (tokenizer.model_max_length - 2) + 1,
+    )
+    max_embeddings_multiples = max(1, max_embeddings_multiples)
+    max_length = (tokenizer.model_max_length - 2) * max_embeddings_multiples + 2
+
+    # pad the length of tokens and weights
+    bos = tokenizer.bos_token_id
+    eos = tokenizer.eos_token_id
+    pad = tokenizer.pad_token_id
+    prompt_tokens, prompt_weights = pad_tokens_and_weights(
+        prompt_tokens,
+        prompt_weights,
+        max_length,
+        bos,
+        eos,
+        pad,
+        no_boseos_middle=no_boseos_middle,
+        chunk_length=tokenizer.model_max_length,
+    )
+
+    prompt_tokens = torch.tensor(prompt_tokens, dtype=torch.long, device=device)
+
+    if any([weight != 1.0 for weight in prompt_weights]):
+        use_prompt_weighting=True
+        empty_tokens = torch.tensor(gen_empty_tokens(bos,eos,pad,prompt_tokens.shape[-1]), device=device).unsqueeze(0)
+        prompt_tokens = torch.cat([prompt_tokens,empty_tokens],dim=0)
+
+    # get the embeddings
+    text_embeddings, pool = get_unweighted_text_embeddings_sdxl(
+        tokenizer,
+        text_encoder,
+        prompt_tokens,
+        tokenizer.model_max_length,
+        eos,
+        pad,
+        no_boseos_middle=no_boseos_middle,
+        pool_out=pool_out,
+    )
+    
+    if use_prompt_weighting:
+        prompt_weights = torch.tensor(prompt_weights, dtype=text_embeddings.dtype, device=device)
+        empty_embeddings = text_embeddings[-1]
+        text_embeddings = text_embeddings[:-1]
+        if pool is not None:
+            pool = pool[:-1]
+        text_embeddings = empty_embeddings + (text_embeddings - empty_embeddings) * prompt_weights.unsqueeze(-1)
+
+    return text_embeddings, pool
 
 # https://wandb.ai/johnowhitaker/multires_noise/reports/Multi-Resolution-Noise-for-Diffusion-Model-Training--VmlldzozNjYyOTU2
 def pyramid_noise_like(noise, device, iterations=6, discount=0.4):

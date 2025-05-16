@@ -31,7 +31,6 @@ import subprocess
 import inspect
 from io import BytesIO
 import toml
-from compel import Compel, ReturnedEmbeddingsType
 
 from tqdm import tqdm
 
@@ -964,8 +963,11 @@ class BaseDataset(torch.utils.data.Dataset):
                     self.bucket_info["buckets"][i] = {"resolution": reso, "count": len(bucket)}
                     logger.info(f"bucket {i}: resolution {reso}, count: {len(bucket)}")
 
-            img_ar_errors = np.array(img_ar_errors)
-            mean_img_ar_error = np.mean(np.abs(img_ar_errors))
+            if len(img_ar_errors) == 0:
+                mean_img_ar_error = 0  # avoid NaN
+            else:
+                img_ar_errors = np.array(img_ar_errors)
+                mean_img_ar_error = np.mean(np.abs(img_ar_errors))
             self.bucket_info["mean_img_ar_error"] = mean_img_ar_error
             logger.info(f"mean ar error (without repeats): {mean_img_ar_error}")
 
@@ -3122,57 +3124,49 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument(
+        "--lr_scheduler_args_te1",
+        type=str,
+        default=None,
+        nargs="*",
+        help='additional arguments for scheduler for te1(like "T_max=100") / スケジューラの追加引数（例： "T_max100"）',
+    )
+
+    parser.add_argument(
+        "--lr_scheduler_args_te2",
+        type=str,
+        default=None,
+        nargs="*",
+        help='additional arguments for scheduler for te2(like "T_max=100") / スケジューラの追加引数（例： "T_max100"）',
+    )
+
+    parser.add_argument(
         "--lr_scheduler",
         type=str,
         default="constant",
         help="scheduler to use for learning rate / 学習率のスケジューラ: linear, cosine, cosine_with_restarts, polynomial, constant (default), constant_with_warmup, adafactor",
     )
+
     parser.add_argument(
-        "--lr_warmup_steps",
-        type=int_or_float,
-        default=0,
-        help="Int number of steps for the warmup in the lr scheduler (default is 0) or float with ratio of train steps"
-        " / 学習率のスケジューラをウォームアップするステップ数（デフォルト0）、または学習ステップの比率（1未満のfloat値の場合）",
+        "--lr_scheduler_te1",
+        type=str,
+        default="constant",
+        help="scheduler to use for learning rate for te1/ 学習率のスケジューラ: linear, cosine, cosine_with_restarts, polynomial, constant (default), constant_with_warmup, adafactor",
     )
+
     parser.add_argument(
-        "--lr_decay_steps",
-        type=int_or_float,
-        default=0,
-        help="Int number of steps for the decay in the lr scheduler (default is 0) or float (<1) with ratio of train steps"
-        " / 学習率のスケジューラを減衰させるステップ数（デフォルト0）、または学習ステップの比率（1未満のfloat値の場合）",
+        "--lr_scheduler_te2",
+        type=str,
+        default="constant",
+        help="scheduler to use for learning rate for te2 / 学習率のスケジューラ: linear, cosine, cosine_with_restarts, polynomial, constant (default), constant_with_warmup, adafactor",
     )
-    parser.add_argument(
-        "--lr_scheduler_num_cycles",
-        type=int,
-        default=1,
-        help="Number of restarts for cosine scheduler with restarts / cosine with restartsスケジューラでのリスタート回数",
-    )
-    parser.add_argument(
-        "--lr_scheduler_power",
-        type=float,
-        default=1,
-        help="Polynomial power for polynomial scheduler / polynomialスケジューラでのpolynomial power",
-    )
+
     parser.add_argument(
         "--fused_backward_pass",
         action="store_true",
         help="Combines backward pass and optimizer step to reduce VRAM usage. Only available in SDXL"
         + " / バックワードパスとオプティマイザステップを組み合わせてVRAMの使用量を削減します。SDXLでのみ有効",
     )
-    parser.add_argument(
-        "--lr_scheduler_timescale",
-        type=int,
-        default=None,
-        help="Inverse sqrt timescale for inverse sqrt scheduler,defaults to `num_warmup_steps`"
-        + " / 逆平方根スケジューラのタイムスケール、デフォルトは`num_warmup_steps`",
-    )
-    parser.add_argument(
-        "--lr_scheduler_min_lr_ratio",
-        type=float,
-        default=None,
-        help="The minimum learning rate as a ratio of the initial learning rate for cosine with min lr scheduler and warmup decay scheduler"
-        + " / 初期学習率の比率としての最小学習率を指定する、cosine with min lr と warmup decay スケジューラ で有効",
-    )
+
 
 
 def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: bool):
@@ -4581,27 +4575,42 @@ def lr_lambda_constant():
 
     return lr_lambda
 
-def lr_lambda_constant_step(step1,step2):
-    def lr_lambda(current_step: int):
-        if step2 < current_step:
-            return 1
-        elif step1 < current_step:
-            return 0.5
-        else:
-            return 0.1
+def lr_lambdaLR_cos_min(
+    optimizer: Optimizer,
+    num_warmup_steps: int,
+    num_training_steps: int,
+    num_cycles: float = 0.5,
+    last_epoch: int = -1,
+    min_lr: float = None,
+    min_lr_rate: float = None,
+):
+    from torch.optim.lr_scheduler import LambdaLR
+    from functools import partial
+    from transformers.optimization import _get_cosine_schedule_with_warmup_lr_lambda
 
-    return lr_lambda
+    if min_lr is not None and min_lr_rate is not None:
+        raise ValueError("Only one of min_lr or min_lr_rate should be set")
+    elif min_lr is not None:
+        raise ValueError("Use min_lr_rate=target_lr/current_lr instead of min_lr")
+    elif min_lr_rate is not None:
+        arg_min_lr_rate = min_lr_rate
+    else:
+        raise ValueError("One of min_lr or min_lr_rate should be set through the `lr_scheduler_kwargs`")
+    
+    if type(arg_min_lr_rate)==str:
+        arg_min_lr_rate = eval(arg_min_lr_rate)
 
-def lr_lambda_constant_zero_turn_one(turn_step:int):
-    def lr_lambda(current_step: int):
-        if current_step < turn_step:
-            return 0
-        else:
-            return 1
+    lr_lambda = partial(
+        _get_cosine_schedule_with_warmup_lr_lambda,
+        num_warmup_steps=num_warmup_steps,
+        num_training_steps=num_training_steps,
+        num_cycles=num_cycles,
+        min_lr_rate=arg_min_lr_rate,
+    )
+        
+    return LambdaLR(optimizer, lr_lambda, last_epoch)
 
-    return lr_lambda
-
-def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
+def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int, optional_lr_scheduler=None, optional_lr_scheduler_args=None):
     """
     Unified API to get any scheduler from its name.
     """
@@ -4613,35 +4622,35 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
     #     lr_scheduler.step = lambda: None
     #     return lr_scheduler
 
-    name = args.lr_scheduler
+    name = args.lr_scheduler if optional_lr_scheduler is None else optional_lr_scheduler
     num_training_steps = args.max_train_steps * num_processes  # * args.gradient_accumulation_steps
-    num_warmup_steps: Optional[int] = (
-        int(args.lr_warmup_steps * num_training_steps) if isinstance(args.lr_warmup_steps, float) else args.lr_warmup_steps
-    )
-    num_decay_steps: Optional[int] = (
-        int(args.lr_decay_steps * num_training_steps) if isinstance(args.lr_decay_steps, float) else args.lr_decay_steps
-    )
-    num_stable_steps = num_training_steps - num_warmup_steps - num_decay_steps
-    num_cycles = args.lr_scheduler_num_cycles
-    power = args.lr_scheduler_power
-    timescale = args.lr_scheduler_timescale
-    min_lr_ratio = args.lr_scheduler_min_lr_ratio
+    num_warmup_steps = 0
+    num_decay_steps = 0
+    num_cycles = 1
+    power = 1
+    timescale = None
+    min_lr_ratio = None
 
     lr_scheduler_kwargs = {}  # get custom lr_scheduler kwargs
-    if args.lr_scheduler_args is not None and len(args.lr_scheduler_args) > 0:
-        for arg in args.lr_scheduler_args:
+    lr_scheduler_args = args.lr_scheduler_args if optional_lr_scheduler_args is None else optional_lr_scheduler_args
+    if lr_scheduler_args is not None and lr_scheduler_args != "none":
+        for arg in lr_scheduler_args:
             key, value = arg.split("=")
-            if value=="%TRAIN_STEPS%":
-                value = num_training_steps-num_warmup_steps
-            else:
-                try:
-                    value = ast.literal_eval(value)
-                except ValueError:
-                    value = value
+            try:
+                value = ast.literal_eval(value)
+            except ValueError:
+                value = value
+
             if key == "min_lr_ratio":
                 min_lr_ratio = value
                 continue
-            elif key == "num_cycles":
+            elif key == "warmup":
+                num_warmup_steps = (int(value * num_training_steps) if isinstance(value, float) else value)
+                continue
+            elif key == "decay":
+                num_decay_steps = (int(value * num_training_steps) if isinstance(value, float) else value)
+                continue
+            elif key == "cycles":
                 num_cycles = value
                 continue
             elif key == "power":
@@ -4651,6 +4660,13 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
                 timescale = value
                 continue
             lr_scheduler_kwargs[key] = value
+        
+        for key , value in lr_scheduler_kwargs.items():
+            if value == "%TRAIN_STEPS%":
+                value = num_training_steps-num_warmup_steps
+                lr_scheduler_kwargs[key] = value
+
+    num_stable_steps = num_training_steps - num_warmup_steps - num_decay_steps
 
     def wrap_check_needless_num_warmup_steps(return_vals):
         if num_warmup_steps is not None and num_warmup_steps != 0:
@@ -4732,7 +4748,7 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
         )
 
     if name == SchedulerType.COSINE_WITH_MIN_LR:
-        return schedule_func(
+        return lr_lambdaLR_cos_min(
             optimizer,
             num_warmup_steps=num_warmup_steps,
             num_training_steps=num_training_steps,
@@ -4771,6 +4787,21 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
         num_decay_steps=num_decay_steps,
         **lr_scheduler_kwargs,
     )
+
+def get_lr_scheduler(args, optimizer, num_processes, train_text_encoders:List[bool]):
+    from torch.optim.lr_scheduler import LambdaLR
+    optional_te_schedulers = [args.lr_scheduler_te1, args.lr_scheduler_te2]
+    optional_te_args = [args.lr_scheduler_args_te1, args.lr_scheduler_args_te2]
+    schedulers = []
+    for train_te,opt_scheduler,opt_args in zip(train_text_encoders,optional_te_schedulers,optional_te_args,strict=True):
+        if train_te:
+            schedulers.append(get_scheduler_fix(args,optimizer,num_processes,opt_scheduler,opt_args))
+
+    schedulers.append(get_scheduler_fix(args,optimizer,num_processes))
+
+    lr_lambas = [scheduler.lr_lambdas[i] if type(scheduler) == LambdaLR else scheduler for i,scheduler in enumerate(schedulers)]
+    last_epoch = -1 if schedulers[-1].last_epoch==0 else schedulers[-1].last_epoch
+    return LambdaLR(optimizer=optimizer,lr_lambda=lr_lambas,last_epoch=last_epoch)
 
 
 
@@ -5159,42 +5190,6 @@ def pool_workaround(
 
     return pooled_output
 
-compel = None
-
-@torch.enable_grad()
-def get_cond_from_compel(text: Union[str, List[str]]) -> torch.FloatTensor:
-    """
-    Take a string or a list of strings and build conditioning tensors to match.
-
-    If multiple strings are passed, the resulting tensors will be padded until they have the same length.
-
-    :return: A tensor consisting of conditioning tensors for each of the passed-in strings, concatenated along dim 0.
-    """
-    assert compel is not None
-
-    if not isinstance(text, list):
-        text = [text]
-
-    cond_tensor = []
-    pooled = []
-    for text_input in text:
-        output = compel.build_conditioning_tensor(text_input)
-
-        if compel.requires_pooled:
-            cond_tensor.append(output[0])
-            pooled.append(output[1])
-        else:
-            cond_tensor.append(output)
-
-    cond_tensor = compel.pad_conditioning_tensors_to_same_length(conditionings=cond_tensor)
-    cond_tensor = torch.cat(cond_tensor)
-
-    if compel.requires_pooled:
-        pooled = torch.cat(pooled)
-        return cond_tensor, pooled
-    else:
-        return cond_tensor
-
 def get_hidden_states_sdxl(
     max_token_length: int,
     input_ids1: torch.Tensor,
@@ -5208,22 +5203,11 @@ def get_hidden_states_sdxl(
     captions : Optional[str] = None
 ):
     if captions:
-        global compel
-        if compel is None:
-            compel = Compel(
-                tokenizer=[tokenizer1, tokenizer2] ,
-                text_encoder=[text_encoder1 if accelerator is None else accelerator.unwrap_model(text_encoder1), text_encoder2 if accelerator is None else accelerator.unwrap_model(text_encoder2)],
-                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
-                requires_pooled=[False, True],
-                truncate_long_prompts=False
-            )
-        conditioning, pooled = get_cond_from_compel(captions)
-        conditioning = conditioning.to(accelerator.device if accelerator else text_encoder1.device)
-        pool2 = pooled.to(accelerator.device if accelerator else text_encoder1.device)
-        # if weight_dtype is not None: #안해도 될것같음 (왜인지 오리지날엔 fp16이없다)
-        #     conditioning = conditioning.to(weight_dtype)
-        #     pool2 = pool2.to(weight_dtype)
-        hidden_states1, hidden_states2 = torch.split(conditioning, [768, 1280], dim=-1)
+        hidden_states1,_ = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer1,text_encoder1,captions,accelerator.device if accelerator else 'cpu',1 if max_token_length is None else max_token_length//75,no_boseos_middle=True)
+        hidden_states2,pool2 = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer2,text_encoder2,captions,accelerator.device if accelerator else 'cpu',1 if max_token_length is None else max_token_length//75,no_boseos_middle=True,pool_out=True)
+        if weight_dtype is not None:
+            hidden_states1 = hidden_states1.to(dtype=weight_dtype)
+            hidden_states2 = hidden_states2.to(dtype=weight_dtype)
     else:
         # input_ids: b,n,77 -> b*n, 77
         b_size = input_ids1.size()[0]

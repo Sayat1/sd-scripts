@@ -93,6 +93,13 @@ class NetworkTrainer:
 
             if args.optimizer_type.lower().startswith("DAdapt".lower()) or "Prodigy".lower() in args.optimizer_type.lower():
                 if args.optimizer_type.lower().endswith("schedulefree"):
+                    if "effective_lr" in lr_scheduler.optimizer.param_groups[i]:
+                        logs[f"lr/effective_lr/{lr_desc}"] = (
+                            lr_scheduler.optimizer.param_groups[i]["effective_lr"]
+                        )
+                        logs[f"lr/d*effective_lr/{lr_desc}"] = (
+                            lr_scheduler.optimizer.param_groups[i]["d"] * lr_scheduler.optimizer.param_groups[i]["effective_lr"]
+                        )
                     logs[f"lr/d*lr/{lr_desc}"] = (
                         lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
                     )
@@ -413,9 +420,8 @@ class NetworkTrainer:
         train_dataset_group.set_max_train_steps(args.max_train_steps)
 
         if not args.use_wrap_schedulefree:
-            # lr schedulerを用意する
-            #lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
-            lr_scheduler = train_util.get_lr_schedule(args, optimizer, accelerator.num_processes)
+            # lr scheduler 그룹마다 따로
+            lr_scheduler = train_util.get_lr_scheduler(args, optimizer, accelerator.num_processes, train_text_encoders)
 
         # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
         if args.full_fp16:
@@ -614,8 +620,12 @@ class NetworkTrainer:
             "ss_gradient_checkpointing": args.gradient_checkpointing,
             "ss_gradient_accumulation_steps": args.gradient_accumulation_steps,
             "ss_max_train_steps": args.max_train_steps,
-            "ss_lr_warmup_steps": args.lr_warmup_steps,
             "ss_lr_scheduler": args.lr_scheduler,
+            "ss_lr_scheduler_te1": args.lr_scheduler_te1,
+            "ss_lr_scheduler_te2": args.lr_scheduler_te2,
+            "ss_lr_scheduler_args": args.lr_scheduler_args,
+            "ss_lr_scheduler_args_te1": args.lr_scheduler_args_te1,
+            "ss_lr_scheduler_args_te2": args.lr_scheduler_args_te2,
             "ss_network_module": args.network_module,
             "ss_network_dim": args.network_dim,  # None means default because another network than LoRA may have another default dim
             "ss_network_alpha": args.network_alpha,  # some networks may not have alpha
