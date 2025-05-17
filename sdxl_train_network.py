@@ -98,7 +98,6 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
             input_ids2 = batch["input_ids2"]
             with torch.enable_grad():
                 if args.weighted_captions:
-                    #weighted_captions 처리. 단 A1111방식과는 좀 다름. (cat:1.2)이 아닌 (cat)1.2
                     encoder_hidden_states1, encoder_hidden_states2, pool2 = train_util.get_hidden_states_sdxl(
                         args.max_token_length,
                         input_ids1,
