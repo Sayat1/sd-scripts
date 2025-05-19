@@ -150,6 +150,7 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
 
     def call_unet(self, args, accelerator, unet, noisy_latents, timesteps, text_conds, batch, weight_dtype):
         noisy_latents = noisy_latents.to(weight_dtype)  # TODO check why noisy_latents is not weight_dtype
+        noisy_latents = torch.cat([noisy_latents] * 2)
 
         # get size embeddings
         orig_size = batch["original_sizes_hw"]
