@@ -4768,6 +4768,8 @@ def get_lr_scheduler(args, optimizer, num_processes, train_text_encoders:List[bo
     schedulers.append(get_scheduler_fix(args,optimizer,num_processes))
 
     lr_lambas = [scheduler.lr_lambdas[i] if type(scheduler) == LambdaLR else scheduler for i,scheduler in enumerate(schedulers)]
+    if len(lr_lambas) != len(optimizer.param_groups):
+        lr_lambas = lr_lambas * len(optimizer.param_groups)
     last_epoch = -1 if schedulers[-1].last_epoch==0 else schedulers[-1].last_epoch
     return LambdaLR(optimizer=optimizer,lr_lambda=lr_lambas,last_epoch=last_epoch)
 
