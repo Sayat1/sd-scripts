@@ -3141,14 +3141,14 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--lr_scheduler_te1",
         type=str,
-        default="constant",
+        default=None,
         help="scheduler to use for learning rate for te1/ 学習率のスケジューラ: linear, cosine, cosine_with_restarts, polynomial, constant (default), constant_with_warmup, adafactor",
     )
 
     parser.add_argument(
         "--lr_scheduler_te2",
         type=str,
-        default="constant",
+        default=None,
         help="scheduler to use for learning rate for te2 / 学習率のスケジューラ: linear, cosine, cosine_with_restarts, polynomial, constant (default), constant_with_warmup, adafactor",
     )
 
@@ -4762,7 +4762,7 @@ def get_lr_scheduler(args, optimizer, num_processes, train_text_encoders:List[bo
     optional_te_args = [args.lr_scheduler_args_te1, args.lr_scheduler_args_te2]
     schedulers = []
     for train_te,opt_scheduler,opt_args in zip(train_text_encoders,optional_te_schedulers,optional_te_args,strict=True):
-        if train_te:
+        if train_te and opt_scheduler is not None:
             schedulers.append(get_scheduler_fix(args,optimizer,num_processes,opt_scheduler,opt_args))
 
     schedulers.append(get_scheduler_fix(args,optimizer,num_processes))
