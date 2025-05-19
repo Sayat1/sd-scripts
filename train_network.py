@@ -1086,6 +1086,9 @@ class NetworkTrainer:
                             weight_dtype,
                         )
 
+                    cond_pred , uncond_pred = noise_pred.chunk(2)
+                    noise_pred = uncond_pred + (cond_pred - uncond_pred) * 1
+
                     weighting = None
                     if edm_training:
                         if args.weighting_scheme == "none":
