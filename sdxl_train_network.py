@@ -159,7 +159,12 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
 
         # concat embeddings
         encoder_hidden_states1, encoder_hidden_states2, pool2 = text_conds
-        vector_embedding = torch.cat([pool2, embs], dim=1).to(weight_dtype)
+
+        #embs 는 배치1이니까, pool을 나눠서 embs와 결합후 다시 배치2로 결합
+        text_pool , uncond_pool = pool2.chunk(2)
+        cond_vector = torch.cat([text_pool, embs], dim=1)
+        uncond_vector = torch.cat([uncond_pool, embs], dim=1)
+        vector_embedding = torch.cat([uncond_vector, cond_vector]).to(weight_dtype)
         text_embedding = torch.cat([encoder_hidden_states1, encoder_hidden_states2], dim=2).to(weight_dtype)
 
         noise_pred = unet(noisy_latents, timesteps, text_embedding, vector_embedding)
