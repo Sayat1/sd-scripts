@@ -748,7 +748,10 @@ class BaseDataset(torch.utils.data.Dataset):
         )
 
         if is_drop_out:
-            caption = ""
+            if hasattr(subset, 'class_tokens'):
+                caption = subset.class_tokens
+            else:
+                cpation = ""
         else:
             # process wildcards
             if subset.enable_wildcard:

@@ -352,7 +352,7 @@ class NetworkTrainer:
 
         if args.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
-            for t_enc,t_te in zip(text_encoders,train_text_encoders):
+            for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
                 if not t_te:
                     continue
                 t_enc.gradient_checkpointing_enable()
@@ -501,18 +501,17 @@ class NetworkTrainer:
             # according to TI example in Diffusers, train is required
             unet.train()
 
-            for t_enc,t_te in zip(text_encoders,train_text_encoders):
+            for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
                 if not t_te:
                     continue
                 t_enc.train()
 
                 # set top parameter requires_grad = True for gradient checkpointing works
-                if t_te:
-                    t_enc.text_model.embeddings.requires_grad_(True)
+                t_enc.text_model.embeddings.requires_grad_(True)
 
         else:
             unet.eval()
-            for t_enc,t_te in zip(text_encoders,train_text_encoders):
+            for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
                 if not t_te:
                     continue
                 t_enc.eval()
