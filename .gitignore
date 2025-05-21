@@ -12,3 +12,4 @@ tran_db_options.txt
 xl_network_options.txt
 tran_network_options.txt
 weighted_caption_sdxl_test.py
+clipoutput/*
