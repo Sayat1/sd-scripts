@@ -141,6 +141,17 @@ class NetworkTrainer:
         input_ids = batch["input_ids"].to(accelerator.device)
         encoder_hidden_states = train_util.get_hidden_states(args, input_ids, tokenizers[0], text_encoders[0], weight_dtype)
         return encoder_hidden_states
+    
+    def is_compiled_module(self, module) -> bool:
+        """Check whether the module was compiled with torch.compile()"""
+        if not hasattr(torch, "_dynamo"):
+            return False
+        return isinstance(module, torch._dynamo.eval_frame.OptimizedModule)
+
+    def unwrap_model(self, accelerator, model):
+        model = accelerator.unwrap_model(model)
+        model = model._orig_mod if self.is_compiled_module(model) else model
+        return model
 
     def call_unet(self, args, accelerator, unet, noisy_latents, timesteps, text_conds, batch, weight_dtype):
         noise_pred = unet(noisy_latents, timesteps, text_conds).sample
@@ -454,7 +465,8 @@ class NetworkTrainer:
             if t_enc.device.type != "cpu":
                 t_enc.to(dtype=te_weight_dtype)
                 # nn.Embedding not support FP8
-                t_enc.text_model.embeddings.to(dtype=(weight_dtype if te_weight_dtype != weight_dtype else te_weight_dtype))
+                #임베딩은 안하기로
+                # t_enc.text_model.embeddings.to(dtype=(weight_dtype if te_weight_dtype != weight_dtype else te_weight_dtype))
 
         # acceleratorがなんかよろしくやってくれるらしい / accelerator will do something good
         use_schedule_free_optimizer = args.optimizer_type.lower().endswith("schedulefree")
@@ -497,26 +509,26 @@ class NetworkTrainer:
             optimizer_train_if_needed = lambda: None
             optimizer_eval_if_needed = lambda: None
 
-        if args.gradient_checkpointing:
-            # according to TI example in Diffusers, train is required
-            unet.train()
+        # if args.gradient_checkpointing:
+        #     # according to TI example in Diffusers, train is required
+        #     unet.train()
 
-            for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
-                if not t_te:
-                    continue
-                t_enc.train()
+        #     for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
+        #         if not t_te:
+        #             continue
+        #         t_enc.train()
 
-                # set top parameter requires_grad = True for gradient checkpointing works
-                t_enc.text_model.embeddings.requires_grad_(True)
+        #         # set top parameter requires_grad = True for gradient checkpointing works
+        #         t_enc.text_model.embeddings.requires_grad_(True)
 
-        else:
-            unet.eval()
-            for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
-                if not t_te:
-                    continue
-                t_enc.eval()
+        # else:
+        #     unet.eval()
+        #     for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
+        #         if not t_te:
+        #             continue
+        #         t_enc.eval()
 
-        del t_enc
+        # del t_enc
 
         accelerator.unwrap_model(network).prepare_grad_etc(text_encoder, unet)
 
@@ -964,6 +976,12 @@ class NetworkTrainer:
             metadata["ss_epoch"] = str(epoch + 1)
 
             accelerator.unwrap_model(network).on_epoch_start(text_encoder, unet)
+            #diffusers에 맞게
+            for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
+                if not t_te:
+                    continue
+                # set top parameter requires_grad = True for gradient checkpointing works
+                accelerator.unwrap_model(t_enc).text_model.embeddings.requires_grad_(True)
 
             skipped_dataloader = None
             if initial_step > 0:
