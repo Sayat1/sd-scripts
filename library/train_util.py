@@ -5476,7 +5476,7 @@ def get_sigmas(timesteps, noise_scheduler, n_dim=4, dtype=torch.float32, device=
 
 sequential_step = 0
 total_timesteps=[]
-def get_timesteps(args, min_timestep, max_timestep, b_size):
+def get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler):
     global sequential_step
     num_timestep = max_timestep - min_timestep
     if args.timestep_sampling == "sigmoid":
@@ -5517,15 +5517,14 @@ def get_timesteps(args, min_timestep, max_timestep, b_size):
         t = torch.rand((b_size,), device="cpu")
 
     indices = (t * (max_timestep - min_timestep) + min_timestep).long()
-    timesteps = indices.to(device="cpu")
+    if 'euler' in args.train_scheduler:
+      timesteps = noise_scheduler.timesteps[indices].long().to(device="cpu")
+    else:
+      timesteps = indices.to(device="cpu")
     return timesteps
 
 def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device):
-    timesteps = get_timesteps(args, min_timestep, max_timestep, b_size)
-
-    # elif 'euler' in args.train_scheduler:
-    #     indices = 999-timesteps #샘플러에서 참조하는 타임스탭은 반대이므로.
-    #     timesteps = noise_scheduler.timesteps[indices].long().to(device="cpu")
+    timesteps = get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler)
 
     if args.loss_type == "huber" or args.loss_type == "smooth_l1":
         if args.huber_schedule == "exponential":
