@@ -115,10 +115,10 @@ def convert_sdxl_text_encoder_2_checkpoint(checkpoint, max_length):
         new_key = convert_key(key)
         if new_key is None:
             continue
-        if "text_projection.weight" in new_key:
-            new_sd[new_key] = checkpoint[key].transpose(0, 1).contiguous()
-        else:
-            new_sd[new_key] = checkpoint[key]
+        # if "text_projection.weight" in new_key:
+        #     new_sd[new_key] = checkpoint[key].transpose(0, 1).contiguous()
+        # else:
+        new_sd[new_key] = checkpoint[key]
 
     # attnの変換
     for key in keys:
