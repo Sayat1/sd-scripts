@@ -5161,14 +5161,11 @@ def get_hidden_states_sdxl(
     captions : Optional[str] = None
 ):
     if captions:
-        if isinstance(captions, str):
-            captions = [captions]
-        captions.append('score_6,score_5,score_4')
-        hidden_states1,_ = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer1,text_encoder1,captions,accelerator.device if accelerator else 'cpu',1 if max_token_length is None else max_token_length//75,no_boseos_middle=True)
-        hidden_states2,pool2 = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer2,text_encoder2,captions,accelerator.device if accelerator else 'cpu',1 if max_token_length is None else max_token_length//75,no_boseos_middle=True,pool_out=True)
-        if weight_dtype is not None:
-            hidden_states1 = hidden_states1.to(dtype=weight_dtype)
-            hidden_states2 = hidden_states2.to(dtype=weight_dtype)
+        hidden_states1,_ = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer1,accelerator.unwrap_model(text_encoder1) if accelerator else text_encoder1,captions,accelerator.device if accelerator else 'cpu',1 if max_token_length is None else max_token_length//75,no_boseos_middle=False)
+        hidden_states2,pool2 = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer2,accelerator.unwrap_model(text_encoder2) if accelerator else text_encoder2,captions,accelerator.device if accelerator else 'cpu',1 if max_token_length is None else max_token_length//75,no_boseos_middle=False,pool_out=True)
+        # if weight_dtype is not None:
+        #     hidden_states1 = hidden_states1.to(dtype=weight_dtype)
+        #     hidden_states2 = hidden_states2.to(dtype=weight_dtype)
     else:
         # input_ids: b,n,77 -> b*n, 77
         b_size = input_ids1.size()[0]
@@ -5542,7 +5539,7 @@ def get_sigmas(timesteps, noise_scheduler, n_dim=4, dtype=torch.float32, device=
 
 sequential_step = 0
 total_timesteps=[]
-def get_timesteps(args, min_timestep, max_timestep, b_size):
+def get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler):
     global sequential_step
     num_timestep = max_timestep - min_timestep
     if args.timestep_sampling == "sigmoid":
@@ -5583,15 +5580,14 @@ def get_timesteps(args, min_timestep, max_timestep, b_size):
         t = torch.rand((b_size,), device="cpu")
 
     indices = (t * (max_timestep - min_timestep) + min_timestep).long()
-    timesteps = indices.to(device="cpu")
+    if 'euler' in args.train_scheduler:
+      timesteps = noise_scheduler.timesteps[indices].long().to(device="cpu")
+    else:
+      timesteps = indices.to(device="cpu")
     return timesteps
 
 def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device):
-    timesteps = get_timesteps(args, min_timestep, max_timestep, b_size)
-
-    # elif 'euler' in args.train_scheduler:
-    #     indices = 999-timesteps #샘플러에서 참조하는 타임스탭은 반대이므로.
-    #     timesteps = noise_scheduler.timesteps[indices].long().to(device="cpu")
+    timesteps = get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler)
 
     if args.loss_type == "huber" or args.loss_type == "smooth_l1":
         if args.huber_schedule == "exponential":
