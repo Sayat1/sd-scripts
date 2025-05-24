@@ -364,8 +364,6 @@ class NetworkTrainer:
         if args.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
             for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
-                if not t_te:
-                    continue
                 t_enc.gradient_checkpointing_enable()
             del t_enc
             network.enable_gradient_checkpointing()  # may have no effect
@@ -489,7 +487,7 @@ class NetworkTrainer:
                 unet.to(accelerator.device, dtype=unet_weight_dtype)  # move to device because unet is not prepared by accelerator
             if train_text_encoder:
                 if len(text_encoders) > 1:
-                    text_encoder = text_encoders = [accelerator.prepare(t_enc) for t_enc in text_encoders]
+                    text_encoder = text_encoders = [accelerator.prepare(t_enc) if t_te else t_enc for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True)]
                 else:
                     text_encoder = accelerator.prepare(text_encoder)
                     text_encoders = [text_encoder]
