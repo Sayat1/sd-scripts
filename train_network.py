@@ -465,6 +465,7 @@ class NetworkTrainer:
                 # nn.Embedding not support FP8
                 #임베딩은 안하기로
                 # t_enc.text_model.embeddings.to(dtype=(weight_dtype if te_weight_dtype != weight_dtype else te_weight_dtype))
+        del t_enc
 
         # acceleratorがなんかよろしくやってくれるらしい / accelerator will do something good
         use_schedule_free_optimizer = args.optimizer_type.lower().endswith("schedulefree")
@@ -980,6 +981,7 @@ class NetworkTrainer:
                     continue
                 # set top parameter requires_grad = True for gradient checkpointing works
                 accelerator.unwrap_model(t_enc).text_model.embeddings.requires_grad_(True)
+            del t_enc
 
             skipped_dataloader = None
             if initial_step > 0:
