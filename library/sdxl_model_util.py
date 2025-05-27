@@ -200,7 +200,7 @@ def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dty
     # U-Net
     logger.info("building U-Net")
     with init_empty_weights():
-        unet = sdxl_original_unet.SdxlUNet2DConditionModel()
+        unet = UNet2DConditionModel()
 
     logger.info("loading U-Net from checkpoint")
     unet_sd = {}
