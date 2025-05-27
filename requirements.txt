@@ -7,7 +7,7 @@ einops==0.7.0
 pytorch-lightning==1.9.0
 tensorboard
 scipy==1.11.4
-safetensors==0.4.2
+safetensors==0.4.3
 omegaconf==2.3.0
 altair==4.2.2
 easygui==0.98.3
