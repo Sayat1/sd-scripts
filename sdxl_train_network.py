@@ -148,6 +148,8 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
 
         return encoder_hidden_states1, encoder_hidden_states2, pool2
 
+    
+
     def call_unet(self, args, accelerator, unet, noisy_latents, timesteps, text_conds, batch, weight_dtype):
         noisy_latents = noisy_latents.to(weight_dtype)  # TODO check why noisy_latents is not weight_dtype
 
@@ -155,13 +157,20 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
         orig_size = batch["original_sizes_hw"]
         crop_size = batch["crop_top_lefts"]
         target_size = batch["target_sizes_hw"]
-        embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
+        # time ids
+        add_time_ids = torch.cat(
+            [
+                sdxl_train_util.compute_time_ids(original_size=s, crops_coords_top_left=c, target_size=t, device=accelerator.device, weight_dtype=weight_dtype)
+                for s, c, t in zip(batch["original_sizes"], batch["crop_top_lefts"], batch["target_sizes_hw"])
+            ]
+        )
+        #embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
 
         # concat embeddings
         encoder_hidden_states1, encoder_hidden_states2, pool2 = text_conds
         # vector_embedding = torch.cat([pool2, embs], dim=1).to(weight_dtype)
         text_embedding = torch.cat([encoder_hidden_states1, encoder_hidden_states2], dim=2).to(weight_dtype)
-        unet_added_conditions = {"time_ids": embs,"text_embeds":pool2}
+        unet_added_conditions = {"time_ids": add_time_ids,"text_embeds":pool2}
 
         noise_pred = unet(noisy_latents, timesteps, text_embedding, added_cond_kwargs=unet_added_conditions,return_dict=False)[0]
         return noise_pred

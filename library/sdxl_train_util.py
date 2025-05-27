@@ -241,6 +241,12 @@ def get_timestep_embedding(x, outdim):
     emb = torch.reshape(emb, (b, dims * outdim))
     return emb
 
+def compute_time_ids(original_size, crops_coords_top_left, target_size, device, weight_dtype):
+    # Adapted from pipeline.StableDiffusionXLPipeline._get_add_time_ids
+    add_time_ids = list(original_size + crops_coords_top_left + target_size)
+    add_time_ids = torch.tensor([add_time_ids])
+    add_time_ids = add_time_ids.to(device, dtype=weight_dtype)
+    return add_time_ids
 
 def get_size_embeddings(orig_size, crop_size, target_size, device):
     emb1 = get_timestep_embedding(orig_size, 256)
