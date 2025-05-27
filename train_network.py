@@ -1120,22 +1120,14 @@ class NetworkTrainer:
                     else:
                         target = latents if edm_training else noise
 
-                    
+                    loss = train_util.conditional_loss(
+                        noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c
+                    )
                     if weighting is not None:
-                        loss = torch.mean(
-                            (weighting.float() * (noise_pred.float() - target.float()) ** 2).reshape(
-                                target.shape[0], -1
-                            ),
-                            1,
-                        )
-                        loss = loss.mean()
-                    else:
-                        loss = train_util.conditional_loss(
-                            noise_pred.float(), target.float(), reduction="mean", loss_type=args.loss_type, huber_c=huber_c
-                        )
+                        loss = loss * weighting
                     if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
                         loss = apply_masked_loss(loss, batch)
-                    
+                    loss = loss.mean([1, 2, 3])
 
                     loss_weights = batch["loss_weights"]  # 各sampleごとのweight
                     loss = loss * loss_weights
