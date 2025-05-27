@@ -1131,7 +1131,7 @@ class NetworkTrainer:
                         loss = loss.mean()
                     else:
                         loss = train_util.conditional_loss(
-                            noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c
+                            noise_pred.float(), target.float(), reduction="mean", loss_type=args.loss_type, huber_c=huber_c
                         )
                     if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
                         loss = apply_masked_loss(loss, batch)
@@ -1141,7 +1141,6 @@ class NetworkTrainer:
                     loss = loss * loss_weights
 
                     if args.min_snr_gamma:
-                        loss = loss.mean(dim=list(range(1, len(loss.shape)))) #loss.mean([1, 2, 3])
                         loss = apply_snr_weight(loss, timesteps, noise_scheduler, args.min_snr_gamma, args.v_parameterization)
                         loss = loss.mean()  # 平均なのでbatch_sizeで割る必要なし
                     if args.scale_v_pred_loss_like_noise_pred:
