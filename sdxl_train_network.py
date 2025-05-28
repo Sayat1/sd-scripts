@@ -161,7 +161,7 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
         add_time_ids = torch.cat(
             [
                 sdxl_train_util.compute_time_ids(original_size=s, crops_coords_top_left=c, target_size=t, device=accelerator.device, weight_dtype=weight_dtype)
-                for s, c, t in zip(batch["original_sizes"], batch["crop_top_lefts"], batch["target_sizes_hw"])
+                for s, c, t in zip(batch["original_sizes_hw"], batch["crop_top_lefts"], batch["target_sizes_hw"])
             ]
         )
         #embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)

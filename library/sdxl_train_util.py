@@ -243,7 +243,7 @@ def get_timestep_embedding(x, outdim):
 
 def compute_time_ids(original_size, crops_coords_top_left, target_size, device, weight_dtype):
     # Adapted from pipeline.StableDiffusionXLPipeline._get_add_time_ids
-    add_time_ids = torch.cat([original_size, crops_coords_top_left, target_size], dim=1)
+    add_time_ids = torch.cat([original_size, crops_coords_top_left, target_size], dim=-1)
     add_time_ids = add_time_ids.unsqueeze(0)
     add_time_ids = add_time_ids.to(device, dtype=weight_dtype)
     return add_time_ids
