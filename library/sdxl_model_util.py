@@ -200,19 +200,20 @@ def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dty
     # U-Net
     logger.info("building U-Net")
     with init_empty_weights():
-        unet = UNet2DConditionModel()
+        unet = UNet2DConditionModel.from_config(DIFFUSERS_SDXL_UNET_CONFIG)  # overwrite unet
 
     logger.info("loading U-Net from checkpoint")
     unet_sd = {}
     for k in list(state_dict.keys()):
         if k.startswith("model.diffusion_model."):
             unet_sd[k.replace("model.diffusion_model.", "")] = state_dict.pop(k)
+    unet_sd = convert_sdxl_unet_state_dict_to_diffusers(unet_sd)
     info = _load_state_dict_on_device(unet, unet_sd, device=map_location, dtype=dtype)
-    logger.info(f"U-Net: {info}")
+    logger.info(f"U-Net diffusers: {info}")
 
     #lowram을 '안'쓰기 위한 방도. 
     unet = unet.to(device="cuda")
-    
+
     # Text Encoders
     logger.info("building text encoders")
 
