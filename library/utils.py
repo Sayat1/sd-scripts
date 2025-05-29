@@ -19,7 +19,9 @@ def colab_delete_file(file_path):
   import os
   try:
     with open(str(file_path),'w') as f:
-      pass
+      f.write('')
+      f.flush()
+      os.fsync(f.fileno())
     os.remove(str(file_path))
     return True
   except Exception:

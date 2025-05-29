@@ -5355,7 +5355,7 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
             for sub_file in sub_files:
                 if not sub_file.is_dir():
                     colab_delete_file(sub_file)
-            Path(state_dir_old).rmdir()
+            shutil.rmtree(state_dir_old)
 
 
 def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_no):
