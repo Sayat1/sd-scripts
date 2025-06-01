@@ -5523,10 +5523,7 @@ def get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler):
         t = torch.rand((b_size,), device="cpu")
 
     indices = (t * (max_timestep - min_timestep) + min_timestep).long()
-    if 'euler' in args.train_scheduler:
-      timesteps = noise_scheduler.timesteps[indices].long().to(device="cpu")
-    else:
-      timesteps = indices.to(device="cpu")
+    timesteps = indices.to(device="cpu")
     return timesteps
 
 def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, device):
