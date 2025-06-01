@@ -462,6 +462,7 @@ class NetworkTrainer:
             t_enc.requires_grad_(False)
             for param in t_enc.parameters(): #그냥. 확인용
                 param.requires_grad = False
+            t_enc.text_model.embeddings.requires_grad_(False)
             # in case of cpu, dtype is already set to fp32 because cpu does not support fp8/fp16/bf16
             if t_enc.device.type != "cpu":
                 t_enc.to(dtype=te_weight_dtype)
