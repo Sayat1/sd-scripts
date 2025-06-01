@@ -1067,8 +1067,10 @@ class NetworkTrainer:
 
                     #수정
                     noisy_latents.requires_grad_(train_unet)
-                    text_encoder_conds.requires_grad_(train_text_encoder)
-                    inp_noisy_latents.requires_grad_(train_unet)
+                    for t in text_encoder_conds:
+                        t.requires_grad_(train_text_encoder)
+                    if edm_training:
+                        inp_noisy_latents.requires_grad_(train_unet)
 
                     # ensure the hidden state will require grad
                     if args.gradient_checkpointing:
