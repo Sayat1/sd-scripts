@@ -455,10 +455,13 @@ class NetworkTrainer:
             te_weight_dtype = torch.float8_e4m3fn
 
         unet.requires_grad_(False)
+        for param in unet.parameters(): #그냥. 확인용
+            param.requires_grad = False
         unet.to(dtype=unet_weight_dtype)
         for t_enc in text_encoders:
             t_enc.requires_grad_(False)
-
+            for param in t_enc.parameters(): #그냥. 확인용
+                param.requires_grad = False
             # in case of cpu, dtype is already set to fp32 because cpu does not support fp8/fp16/bf16
             if t_enc.device.type != "cpu":
                 t_enc.to(dtype=te_weight_dtype)
@@ -970,14 +973,16 @@ class NetworkTrainer:
 
             metadata["ss_epoch"] = str(epoch + 1)
 
-            accelerator.unwrap_model(network).on_epoch_start(text_encoder, unet)
-            #diffusers에 맞게
-            for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
-                if not t_te:
-                    continue
-                # set top parameter requires_grad = True for gradient checkpointing works
-                accelerator.unwrap_model(t_enc).text_model.embeddings.requires_grad_(True)
-            del t_enc
+            if train_unet:
+                accelerator.unwrap_model(network).on_epoch_start(unet)
+            if train_text_encoder:
+                accelerator.unwrap_model(network).on_epoch_start(text_encoder)
+                for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
+                    if not t_te:
+                        continue
+                    # set top parameter requires_grad = True for gradient checkpointing works
+                    accelerator.unwrap_model(t_enc).text_model.embeddings.requires_grad_(True)
+                del t_enc
 
             skipped_dataloader = None
             if initial_step > 0:
@@ -1059,15 +1064,20 @@ class NetworkTrainer:
                         else:
                             inp_noisy_latents = noisy_latents / ((sigmas**2 + 1) ** 0.5)
 
+                    #수정
+                    noisy_latents.requires_grad_(train_unet)
+                    text_encoder_conds.requires_grad_(train_text_encoder)
+                    inp_noisy_latents.requires_grad_(train_unet)
+
                     # ensure the hidden state will require grad
                     if args.gradient_checkpointing:
                         for x in noisy_latents:
-                            x.requires_grad_(True)
+                            x.requires_grad_(train_unet) #무조건 True 대신 아마?        
                         for t in text_encoder_conds:
-                            t.requires_grad_(True)
+                            t.requires_grad_(train_text_encoder) #무조건 True 대신 아마?
                         if edm_training:
                             for x in inp_noisy_latents:
-                                x.requires_grad_(True)
+                                x.requires_grad_(train_unet) #무조건 True 대신 아마?
 
                     # Predict the noise residual
                     with accelerator.autocast():
@@ -1075,7 +1085,7 @@ class NetworkTrainer:
                             args,
                             accelerator,
                             unet,
-                            inp_noisy_latents.requires_grad_(train_unet) if edm_training else noisy_latents.requires_grad_(train_unet),
+                            inp_noisy_latents if edm_training else noisy_latents,
                             timesteps,
                             text_encoder_conds,
                             batch,
