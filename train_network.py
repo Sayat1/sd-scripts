@@ -37,6 +37,7 @@ from library.custom_train_functions import (
     add_v_prediction_like_loss,
     apply_debiased_estimation,
     apply_masked_loss,
+    get_mask_weight,
 )
 from library.utils import setup_logging, add_logging_arguments
 
@@ -1129,13 +1130,21 @@ class NetworkTrainer:
                     else:
                         target = latents if edm_training else noise
 
-                    loss = train_util.conditional_loss(
-                        noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c
-                    )
+                    if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
+                        mask_weight = get_mask_weight(target, batch, face_weight=args.masked_loss_face_weight, body_weight=args.masked_loss_body_weight)
+                        masked_noise_pred = noise_pred * mask_weight
+                        masked_target = target * mask_weight
+                        
+                        loss = train_util.conditional_loss(
+                            masked_noise_pred.float(), masked_target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c
+                        )
+                    else:
+                        loss = train_util.conditional_loss(
+                            noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c
+                        )
                     if weighting is not None:
                         loss = loss * weighting
-                    if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
-                        loss = apply_masked_loss(loss, batch)
+                        
                     loss = loss.mean([1, 2, 3])
 
                     loss_weights = batch["loss_weights"]  # 各sampleごとのweight
