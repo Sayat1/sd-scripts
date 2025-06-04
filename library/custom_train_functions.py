@@ -660,8 +660,31 @@ def apply_noise_offset(latents, noise, noise_offset, adaptive_noise_scale):
     noise = noise + noise_offset * torch.randn((latents.shape[0], latents.shape[1], 1, 1), device=latents.device)
     return noise
 
+def get_mask_weight(target, batch, face_weight=1.0, body_weight=1.0):
+    import torchvision.transforms.functional as TF
+    if "alpha_masks" in batch and batch["alpha_masks"] is not None:
+        # alpha mask is 0 to 1
+        mask_image = batch["alpha_masks"].to(dtype=target.dtype).unsqueeze(1) # add channel dimension
+    else:
+        return torch.ones_like(target, dtype=target.dtype, device=target.device)
+    
+    mask_image = torch.nn.functional.interpolate(mask_image, size=target.shape[2:], mode="area")
 
-def apply_masked_loss(loss, batch):
+    body_mask = (mask_image >= 0.2).float() * body_weight
+
+    face_mask = (mask_image >= 0.8).float() * face_weight
+
+    merged_mask_image = torch.maximum(body_mask, face_mask)
+
+    merged_mask_image = TF.gaussian_blur(merged_mask_image, kernel_size=5, sigma=1.0)
+
+    merged_mask_image = merged_mask_image.to(dtype=target.dtype,device=target.device)
+
+    return merged_mask_image
+
+
+def apply_masked_loss(loss, batch, face_weight=1.0, body_weight=1.0):
+    import torchvision.transforms.functional as TF
     if "conditioning_images" in batch:
         # conditioning image is -1 to 1. we need to convert it to 0 to 1
         mask_image = batch["conditioning_images"].to(dtype=loss.dtype)[:, 0].unsqueeze(1)  # use R channel
@@ -676,7 +699,16 @@ def apply_masked_loss(loss, batch):
 
     # resize to the same size as the loss
     mask_image = torch.nn.functional.interpolate(mask_image, size=loss.shape[2:], mode="area")
-    loss = loss * mask_image
+
+    body_mask = (mask_image >= 0.2).float() * body_weight
+
+    face_mask = (mask_image >= 0.8).float() * face_weight
+
+    merged_mask_image = torch.maximum(body_mask, face_mask)
+
+    merged_mask_image = TF.gaussian_blur(merged_mask_image, kernel_size=5, sigma=1.0)
+
+    loss = loss * merged_mask_image
     return loss
 
 
