@@ -1130,20 +1130,15 @@ class NetworkTrainer:
                     else:
                         target = latents if edm_training else noise
 
-                    if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
-                        mask_weight = get_mask_weight(target, batch, face_weight=args.masked_loss_face_weight, body_weight=args.masked_loss_body_weight)
-                        masked_noise_pred = noise_pred * mask_weight
-                        masked_target = target * mask_weight
-                        
-                        loss = train_util.conditional_loss(
-                            masked_noise_pred.float(), masked_target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c
-                        )
-                    else:
-                        loss = train_util.conditional_loss(
+                    loss = train_util.conditional_loss(
                             noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c
                         )
+                    
                     if weighting is not None:
                         loss = loss * weighting
+
+                    if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
+                        loss = apply_masked_loss(loss, batch, face_weight=args.masked_loss_face_weight, body_weight=args.masked_loss_body_weight)
                         
                     loss = loss.mean([1, 2, 3])
 
