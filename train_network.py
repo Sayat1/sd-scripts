@@ -268,6 +268,13 @@ class NetworkTrainer:
         # text_encoder is List[CLIPTextModel] or CLIPTextModel
         text_encoders = text_encoder if isinstance(text_encoder, list) else [text_encoder]
 
+        #TE1중 일부가 nan인 경우가 있음. (layer11. 필요는 없지만 혹시모름)
+        for name, module in text_encoders[0].named_modules():
+          if isinstance(module, torch.nn.Linear):
+              if hasattr(module, "weight") and torch.isnan(module.weight).any():
+                  print(f"[Reinitializing] NaN in module: {name}")
+                  train_util.reinit_linear_module(module)
+
         # モデルに xformers とか memory efficient attention を組み込む
         # train_util.replace_unet_modules(unet, args.mem_eff_attn, args.xformers, args.sdpa)
         # if torch.__version__ >= "2.0.0":  # PyTorch 2.0.0 以上対応のxformersなら以下が使える

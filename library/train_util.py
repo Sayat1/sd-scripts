@@ -6131,6 +6131,13 @@ class ImageLoadingDataset(torch.utils.data.Dataset):
         return (tensor_pil, img_path)
 
 
+def reinit_linear_module(module: torch.nn.Linear):
+    torch.nn.init.kaiming_uniform_(module.weight, a=math.sqrt(5))
+    if module.bias is not None:
+        fan_in, _ = torch.nn.init._calculate_fan_in_and_fan_out(module.weight)
+        bound = 1 / math.sqrt(fan_in)
+        torch.nn.init.uniform_(module.bias, -bound, bound)
+
 # endregion
 
 
