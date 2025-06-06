@@ -683,7 +683,7 @@ def get_mask_weight(target, batch, face_weight=1.0, body_weight=1.0):
     return merged_mask_image
 
 
-def apply_masked_loss(loss, batch, face_weight=1.0, body_weight=1.0):
+def apply_masked_loss(loss, batch, face_weight=1.0, body_weight=1.0, nonmask_weight=0.0):
     import torchvision.transforms.functional as TF
     if "conditioning_images" in batch:
         # conditioning image is -1 to 1. we need to convert it to 0 to 1
@@ -700,13 +700,15 @@ def apply_masked_loss(loss, batch, face_weight=1.0, body_weight=1.0):
     # resize to the same size as the loss
     mask_image = torch.nn.functional.interpolate(mask_image, size=loss.shape[2:], mode="area")
 
+    non_mask = (mask_image < 0.2).float() * nonmask_weight
+
     body_mask = (mask_image >= 0.2).float() * body_weight
 
     face_mask = (mask_image >= 0.8).float() * face_weight
 
-    merged_mask_image = torch.maximum(body_mask, face_mask)
+    merged_mask_image = torch.maximum(body_mask, torch.maximum(face_mask, non_mask))
 
-    merged_mask_image = TF.gaussian_blur(merged_mask_image, kernel_size=5, sigma=1.0)
+    merged_mask_image = TF.gaussian_blur(merged_mask_image, kernel_size=3, sigma=1.0)
 
     loss = loss * merged_mask_image
     return loss

@@ -3706,6 +3706,12 @@ def add_masked_loss_arguments(parser: argparse.ArgumentParser):
         default=1.0,
         help="mask weight for body region(alpha>=0.2) in masked loss (default is 1.0) / マスク損失における顔領域のマスクの重み（デフォルトは1.0）",
     )
+    parser.add_argument(
+        "--masked_loss_nonmask_weight",
+        type=float,
+        default=0.0,
+        help="mask weight for body region(alpha<0.2) in masked loss (default is 0) / マスク損失における顔領域のマスクの重み（デフォルトは1.0）",
+    )
 
 
 def get_sanitized_config_or_none(args: argparse.Namespace):
