@@ -284,7 +284,6 @@ def get_prompts_with_weights(tokenizer, prompt: List[str], max_length: int):
         logger.warning("Prompt was truncated. Try to shorten the prompt or increase max_embeddings_multiples")
     return tokens, weights
 
-@torch.enable_grad()
 def pad_tokens_and_weights(tokens, weights, max_length, bos, eos, pad, no_boseos_middle=True, chunk_length=77):
     r"""
     Pad the tokens (with starting and ending tokens) and weights (with 1.0) to max_length.
@@ -374,7 +373,6 @@ def get_unweighted_text_embeddings(
             text_embeddings = text_encoder.text_model.final_layer_norm(text_embeddings)
     return text_embeddings
 
-@torch.enable_grad()
 def get_unweighted_text_embeddings_sdxl(
     tokenizer,
     text_encoder,
@@ -541,7 +539,6 @@ def gen_empty_tokens(bos,eos,pad, length):
     return output
 
 
-@torch.enable_grad()
 def get_weighted_text_embeddings_sdxl(
     tokenizer,
     text_encoder,
