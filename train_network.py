@@ -318,11 +318,13 @@ class NetworkTrainer:
 
             accelerator.print(f"all weights merged: {', '.join(args.base_weights)}")
 
+        # VAE를 학습시킬거면 삭제하기
+        vae.requires_grad_(False)
+        vae.eval()
+
         # 学習を準備する
         if cache_latents and not pre_cached:
             vae.to(accelerator.device, dtype=vae_dtype)
-            vae.requires_grad_(False)
-            vae.eval()
             with torch.no_grad():
                 train_dataset_group.cache_latents(vae, args.vae_batch_size, args.cache_latents_to_disk, accelerator.is_main_process)
             vae.to("cpu")
