@@ -262,6 +262,22 @@ class NetworkTrainer:
         weight_dtype, save_dtype = train_util.prepare_dtype(args)
         vae_dtype = torch.float32 if args.no_half_vae else torch.float16 #weight_dtype대신 fp16으로 고정
 
+        pre_cached = False
+
+        if args.vae is not None and cache_latents:
+            vae = model_util.load_vae(args.vae, weight_dtype)
+            logger.info("additional VAE loaded")
+            vae.to(accelerator.device, dtype=vae_dtype)
+            vae.requires_grad_(False)
+            vae.eval()
+            with torch.no_grad():
+                train_dataset_group.cache_latents(vae, args.vae_batch_size, args.cache_latents_to_disk, accelerator.is_main_process)
+            vae.to("cpu")
+            pre_cached = True
+            accelerator.wait_for_everyone()
+            del vae
+            clean_memory_on_device(accelerator.device)
+
         # モデルを読み込む
         model_version, text_encoder, vae, unet = self.load_target_model(args, weight_dtype, accelerator)
 
@@ -303,7 +319,7 @@ class NetworkTrainer:
             accelerator.print(f"all weights merged: {', '.join(args.base_weights)}")
 
         # 学習を準備する
-        if cache_latents:
+        if cache_latents and not pre_cached:
             vae.to(accelerator.device, dtype=vae_dtype)
             vae.requires_grad_(False)
             vae.eval()

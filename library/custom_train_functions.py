@@ -538,7 +538,6 @@ def gen_empty_tokens(bos,eos,pad, length):
     output += [pad_token] * (length - len(output))
     return output
 
-
 def get_weighted_text_embeddings_sdxl(
     tokenizer,
     text_encoder,
