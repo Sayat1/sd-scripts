@@ -318,7 +318,7 @@ class NetworkTrainer:
 
             accelerator.print(f"all weights merged: {', '.join(args.base_weights)}")
 
-        # VAE를 학습시킬거면 삭제하기
+        # VAE를 학습시킬거면 삭제할것
         vae.requires_grad_(False)
         vae.eval()
 
