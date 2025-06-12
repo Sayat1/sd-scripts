@@ -311,6 +311,10 @@ class NetworkTrainer:
 
             accelerator.print(f"all weights merged: {', '.join(args.base_weights)}")
 
+        # VAE를 학습시킬거면 삭제할것
+        vae.requires_grad_(False)
+        vae.eval()
+
         # 学習を準備する
         if cache_latents and not pre_cached:
             vae.to(accelerator.device, dtype=vae_dtype)
