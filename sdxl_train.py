@@ -205,6 +205,22 @@ def train(args):
     weight_dtype, save_dtype = train_util.prepare_dtype(args)
     vae_dtype = torch.float32 if args.no_half_vae else weight_dtype
 
+    pre_cached = False
+
+    if args.vae is not None and cache_latents:
+        vae = model_util.load_vae(args.vae, weight_dtype)
+        logger.info("additional VAE loaded")
+        vae.to(accelerator.device, dtype=vae_dtype)
+        vae.requires_grad_(False)
+        vae.eval()
+        with torch.no_grad():
+            train_dataset_group.cache_latents(vae, args.vae_batch_size, args.cache_latents_to_disk, accelerator.is_main_process)
+        vae.to("cpu")
+        pre_cached = True
+        accelerator.wait_for_everyone()
+        del vae
+        clean_memory_on_device(accelerator.device)
+
     # モデルを読み込む
     (
         load_stable_diffusion_format,
@@ -216,6 +232,13 @@ def train(args):
         ckpt_info,
     ) = sdxl_train_util.load_target_model(args, accelerator, "sdxl", weight_dtype)
     # logit_scale = logit_scale.to(accelerator.device, dtype=weight_dtype)
+
+    #TE1중 일부가 nan인 경우가 있음. (layer11. 필요는 없지만 혹시모름)
+    for name, module in text_encoder1.named_modules():
+        if isinstance(module, torch.nn.Linear):
+            if hasattr(module, "weight") and torch.isnan(module.weight).any():
+                print(f"[Reinitializing] NaN in module: {name}")
+                train_util.reinit_linear_module(module)
 
     # verify load/save model formats
     if load_stable_diffusion_format:
@@ -233,32 +256,37 @@ def train(args):
         use_safetensors = args.use_safetensors or ("safetensors" in args.save_model_as.lower())
         # assert save_stable_diffusion_format, "save_model_as must be ckpt or safetensors / save_model_asはckptかsafetensorsである必要があります"
 
-    # Diffusers版のxformers使用フラグを設定する関数
-    def set_diffusers_xformers_flag(model, valid):
-        def fn_recursive_set_mem_eff(module: torch.nn.Module):
-            if hasattr(module, "set_use_memory_efficient_attention_xformers"):
-                module.set_use_memory_efficient_attention_xformers(valid)
+    # # Diffusers版のxformers使用フラグを設定する関数
+    # def set_diffusers_xformers_flag(model, valid):
+    #     def fn_recursive_set_mem_eff(module: torch.nn.Module):
+    #         if hasattr(module, "set_use_memory_efficient_attention_xformers"):
+    #             module.set_use_memory_efficient_attention_xformers(valid)
 
-            for child in module.children():
-                fn_recursive_set_mem_eff(child)
+    #         for child in module.children():
+    #             fn_recursive_set_mem_eff(child)
 
-        fn_recursive_set_mem_eff(model)
+    #     fn_recursive_set_mem_eff(model)
 
-    # モデルに xformers とか memory efficient attention を組み込む
-    if args.diffusers_xformers:
-        # もうU-Netを独自にしたので動かないけどVAEのxformersは動くはず
-        accelerator.print("Use xformers by Diffusers")
-        # set_diffusers_xformers_flag(unet, True)
-        set_diffusers_xformers_flag(vae, True)
-    else:
-        # Windows版のxformersはfloatで学習できなかったりするのでxformersを使わない設定も可能にしておく必要がある
-        accelerator.print("Disable Diffusers' xformers")
-        train_util.replace_unet_modules(unet, args.mem_eff_attn, args.xformers, args.sdpa)
-        if torch.__version__ >= "2.0.0":  # PyTorch 2.0.0 以上対応のxformersなら以下が使える
-            vae.set_use_memory_efficient_attention_xformers(args.xformers)
+    # # モデルに xformers とか memory efficient attention を組み込む
+    # if args.diffusers_xformers:
+    #     # もうU-Netを独自にしたので動かないけどVAEのxformersは動くはず
+    #     accelerator.print("Use xformers by Diffusers")
+    #     # set_diffusers_xformers_flag(unet, True)
+    #     set_diffusers_xformers_flag(vae, True)
+    # else:
+    #     # Windows版のxformersはfloatで学習できなかったりするのでxformersを使わない設定も可能にしておく必要がある
+    #     accelerator.print("Disable Diffusers' xformers")
+    #     train_util.replace_unet_modules(unet, args.mem_eff_attn, args.xformers, args.sdpa)
+    #     if torch.__version__ >= "2.0.0":  # PyTorch 2.0.0 以上対応のxformersなら以下が使える
+    #         vae.set_use_memory_efficient_attention_xformers(args.xformers)
+
+    # VAE를 학습시킬거면 삭제할것
+    vae.requires_grad_(False)
+    vae.eval()
+
 
     # 学習を準備する
-    if cache_latents:
+    if cache_latents and not pre_cached:
         vae.to(accelerator.device, dtype=vae_dtype)
         vae.requires_grad_(False)
         vae.eval()
