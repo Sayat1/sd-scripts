@@ -704,10 +704,11 @@ def apply_masked_loss(loss, batch, face_weight=1.0, body_weight=1.0, nonmask_wei
 
     merged_mask_image = torch.maximum(body_mask, torch.maximum(face_mask, non_mask))
 
-    merged_mask_image = TF.gaussian_blur(merged_mask_image, kernel_size=3, sigma=1.0)
-
     #정규화
     merged_mask_image = merged_mask_image / (merged_mask_image.mean() + 1e-8)
+
+    merged_mask_image = TF.gaussian_blur(merged_mask_image, kernel_size=3, sigma=1.0)
+
 
     loss = loss * merged_mask_image
     return loss

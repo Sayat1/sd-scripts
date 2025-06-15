@@ -104,9 +104,6 @@ def train(args):
     setup_logging(args, reset=True)
 
     assert (
-        not args.weighted_captions
-    ), "weighted_captions is not supported currently / weighted_captionsは現在サポートされていません"
-    assert (
         not args.train_text_encoder or not args.cache_text_encoder_outputs
     ), "cache_text_encoder_outputs is not supported when training text encoder / text encoderを学習するときはcache_text_encoder_outputsはサポートされていません"
 
@@ -208,6 +205,7 @@ def train(args):
     pre_cached = False
 
     if args.vae is not None and cache_latents:
+        from library import model_util
         vae = model_util.load_vae(args.vae, weight_dtype)
         logger.info("additional VAE loaded")
         vae.to(accelerator.device, dtype=vae_dtype)
@@ -697,6 +695,7 @@ def train(args):
                             text_encoder2,
                             None if not args.full_fp16 else weight_dtype,
                             accelerator=accelerator,
+                            captions=batch["captions"]
                         )
                 else:
                     encoder_hidden_states1 = batch["text_encoder_outputs1_list"].to(accelerator.device).to(weight_dtype)
@@ -721,14 +720,16 @@ def train(args):
                     # logger.info("text encoder outputs verified")
 
                 # get size embeddings
-                orig_size = batch["original_sizes_hw"]
-                crop_size = batch["crop_top_lefts"]
-                target_size = batch["target_sizes_hw"]
-                embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
+                add_time_ids = torch.cat(
+                    [
+                        sdxl_train_util.compute_time_ids(original_size=s, crops_coords_top_left=c, target_size=t, device=accelerator.device, weight_dtype=weight_dtype)
+                        for s, c, t in zip(batch["original_sizes_hw"], batch["crop_top_lefts"], batch["target_sizes_hw"])
+                    ]
+                )
 
                 # concat embeddings
-                vector_embedding = torch.cat([pool2, embs], dim=1).to(weight_dtype)
                 text_embedding = torch.cat([encoder_hidden_states1, encoder_hidden_states2], dim=2).to(weight_dtype)
+                unet_added_conditions = {"time_ids": add_time_ids,"text_embeds":pool2}
 
                 # Sample noise, sample a random timestep for each image, and add noise to the latents,
                 # with noise offset and/or multires noise if specified
@@ -740,7 +741,7 @@ def train(args):
 
                 # Predict the noise residual
                 with accelerator.autocast():
-                    noise_pred = unet(noisy_latents, timesteps, text_embedding, vector_embedding)
+                    noise_pred = unet(noisy_latents, timesteps, text_embedding, added_cond_kwargs=unet_added_conditions,return_dict=False)[0]
 
                 if args.v_parameterization:
                     # v-parameterization training
