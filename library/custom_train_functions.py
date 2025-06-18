@@ -459,7 +459,7 @@ def get_unweighted_text_embeddings_sdxl(
             #pool2 = pool2[::max_embeddings_multiples]
         
     else:
-        attn_mask = create_attention_mask(text_input_chunk, pad, eos)
+        attn_mask = create_attention_mask(text_input, pad, eos)
         enc_out = text_encoder(text_input, output_hidden_states=True, attention_mask=attn_mask, return_dict=True)
         text_embeddings = enc_out["hidden_states"][-2]
         if pool_out:
