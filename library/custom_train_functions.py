@@ -2,6 +2,7 @@ import torch
 import argparse
 import random
 import re
+import numpy as np
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 from typing import List, Optional, Union
 from .utils import setup_logging
@@ -373,6 +374,25 @@ def get_unweighted_text_embeddings(
             text_embeddings = text_encoder.text_model.final_layer_norm(text_embeddings)
     return text_embeddings
 
+def create_attention_mask(token_ids: torch.Tensor, pad, eos) -> torch.Tensor:
+    """
+    Returns attention_mask where only the first EOS (if any) is included.
+    All subsequent EOS tokens (used as PAD) are excluded (mask=0).
+    """
+    if pad == eos: # v1
+      batch_size, seq_len = token_ids.shape
+      attn_mask = torch.ones_like(token_ids, dtype=torch.long)
+
+      for i in range(batch_size):
+        eos_pos = (token_ids[i] == eos).nonzero(as_tuple=False)
+        if eos_pos.numel() > 0:
+            first_eos = eos_pos[0].item()
+            attn_mask[i][first_eos+1:] = 0
+    else: # v2
+      attn_mask = (token_ids != pad).int()
+    
+    return attn_mask
+
 def get_unweighted_text_embeddings_sdxl(
     tokenizer,
     text_encoder,
@@ -411,7 +431,8 @@ def get_unweighted_text_embeddings_sdxl(
                     if text_input_chunk[j, 1] == pad:  # BOSだけであとはPAD
                         text_input_chunk[j, 1] = eos
 
-            enc_out = text_encoder(text_input_chunk, output_hidden_states=True, return_dict=True)
+            attn_mask = create_attention_mask(text_input_chunk, pad, eos)
+            enc_out = text_encoder(text_input_chunk, output_hidden_states=True, attention_mask=attn_mask, return_dict=True)
             text_embedding = enc_out["hidden_states"][-2]
 
             if no_boseos_middle:
@@ -438,7 +459,8 @@ def get_unweighted_text_embeddings_sdxl(
             #pool2 = pool2[::max_embeddings_multiples]
         
     else:
-        enc_out = text_encoder(text_input, output_hidden_states=True, return_dict=True)
+        attn_mask = create_attention_mask(text_input_chunk, pad, eos)
+        enc_out = text_encoder(text_input, output_hidden_states=True, attention_mask=attn_mask, return_dict=True)
         text_embeddings = enc_out["hidden_states"][-2]
         if pool_out:
             pool2 = pool_workaround(text_encoder, enc_out["last_hidden_state"], text_input, eos)
@@ -600,7 +622,8 @@ def get_weighted_text_embeddings_sdxl(
 
     prompt_tokens = torch.tensor(prompt_tokens, dtype=torch.long, device=device)
 
-    if any([weight != 1.0 for weight in prompt_weights]):
+    prompt_weights = np.array(prompt_weights)
+    if np.any(prompt_weights != 1.0):
         use_prompt_weighting=True
         empty_tokens = torch.tensor(gen_empty_tokens(bos,eos,pad,prompt_tokens.shape[-1]), device=device).unsqueeze(0)
         prompt_tokens = torch.cat([prompt_tokens,empty_tokens],dim=0)
