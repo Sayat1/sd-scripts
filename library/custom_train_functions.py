@@ -431,8 +431,7 @@ def get_unweighted_text_embeddings_sdxl(
                     if text_input_chunk[j, 1] == pad:  # BOSだけであとはPAD
                         text_input_chunk[j, 1] = eos
 
-            attn_mask = create_attention_mask(text_input_chunk, pad, eos)
-            enc_out = text_encoder(text_input_chunk, output_hidden_states=True, attention_mask=attn_mask, return_dict=True)
+            enc_out = text_encoder(text_input_chunk, output_hidden_states=True, return_dict=True)
             text_embedding = enc_out["hidden_states"][-2]
 
             if no_boseos_middle:
@@ -459,8 +458,7 @@ def get_unweighted_text_embeddings_sdxl(
             #pool2 = pool2[::max_embeddings_multiples]
         
     else:
-        attn_mask = create_attention_mask(text_input, pad, eos)
-        enc_out = text_encoder(text_input, output_hidden_states=True, attention_mask=attn_mask, return_dict=True)
+        enc_out = text_encoder(text_input, output_hidden_states=True, return_dict=True)
         text_embeddings = enc_out["hidden_states"][-2]
         if pool_out:
             pool2 = pool_workaround(text_encoder, enc_out["last_hidden_state"], text_input, eos)
