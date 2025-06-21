@@ -558,6 +558,23 @@ def gen_empty_tokens(bos,eos,pad, length):
     output += [pad_token] * (length - len(output))
     return output
 
+def gen_empty_tokens2(bos,eos,pad, tokens):
+    start_token = bos
+    end_token = eos
+    pad_token = pad
+    output = []
+    for b_tokens in tokens:
+        out= []
+        for token in b_tokens:
+            if token == start_token:
+                out.append(start_token)
+            elif token == end_token:
+                out.append(end_token)
+            else:
+                out.append(pad_token)
+        output.append(out)
+    return output
+
 def get_weighted_text_embeddings_sdxl(
     tokenizer,
     text_encoder,
@@ -623,7 +640,8 @@ def get_weighted_text_embeddings_sdxl(
     prompt_weights = np.array(prompt_weights)
     if np.any(prompt_weights != 1.0):
         use_prompt_weighting=True
-        empty_tokens = torch.tensor(gen_empty_tokens(bos,eos,pad,prompt_tokens.shape[-1]), device=device).unsqueeze(0)
+        empty_tokens = torch.tensor(gen_empty_tokens2(bos, eos, pad, prompt_tokens), device=device)
+        #empty_tokens = torch.tensor(gen_empty_tokens(bos,eos,pad,prompt_tokens.shape[-1]), device=device).unsqueeze(0)
         prompt_tokens = torch.cat([prompt_tokens,empty_tokens],dim=0)
 
     # get the embeddings
