@@ -390,7 +390,8 @@ class NetworkTrainer:
         if args.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
             for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
-                t_enc.gradient_checkpointing_enable()
+                if t_te:
+                    t_enc.gradient_checkpointing_enable()
             del t_enc
             network.enable_gradient_checkpointing()  # may have no effect
 
