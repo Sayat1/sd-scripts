@@ -339,7 +339,7 @@ class NetworkTrainer:
         )
         text_encoder_lrs = [args.text_encoder_lr]
         text_encoder_lrs.append(args.text_encoder_lr_2 if args.text_encoder_lr_2!=None else args.text_encoder_lr)
-        train_text_encoders = [tlr!=0 for tlr in text_encoder_lrs]
+        train_text_encoders = [tlr!=0 and tlr!=None for tlr in text_encoder_lrs]
         # prepare network
         net_kwargs = {}
         if args.network_args is not None:
