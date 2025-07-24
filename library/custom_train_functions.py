@@ -640,6 +640,8 @@ def get_weighted_text_embeddings_sdxl(
     prompt_weights = np.array(prompt_weights)
     if np.any(prompt_weights != 1.0):
         use_prompt_weighting=True
+        #gen_empty_tokens2 대로 토큰별로 eos를 계산하려면, 배치 수가 필요함 (원래라면 필요없음) 성능이슈가 있을수도
+        batch_num = prompt_tokens.shape[0]
         empty_tokens = torch.tensor(gen_empty_tokens2(bos, eos, pad, prompt_tokens), device=device)
         #empty_tokens = torch.tensor(gen_empty_tokens(bos,eos,pad,prompt_tokens.shape[-1]), device=device).unsqueeze(0)
         prompt_tokens = torch.cat([prompt_tokens,empty_tokens],dim=0)
@@ -658,10 +660,10 @@ def get_weighted_text_embeddings_sdxl(
     
     if use_prompt_weighting:
         prompt_weights = torch.tensor(prompt_weights, dtype=text_embeddings.dtype, device=device)
-        empty_embeddings = text_embeddings[-1]
-        text_embeddings = text_embeddings[:-1]
+        empty_embeddings = text_embeddings[batch_num:]
+        text_embeddings = text_embeddings[:batch_num]
         if pool is not None:
-            pool = pool[:-1]
+            pool = pool[:batch_num]
         text_embeddings = empty_embeddings + (text_embeddings - empty_embeddings) * prompt_weights.unsqueeze(-1)
 
     return text_embeddings, pool
