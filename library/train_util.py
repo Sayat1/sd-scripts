@@ -5706,6 +5706,9 @@ def create_train_scheduler(args):
         scheduler_cls = DDPMScheduler
     elif train_scheduler == "pndm":
         scheduler_cls = PNDMScheduler
+        sched_init_args["set_alpha_to_one"] = False
+        sched_init_args["skip_prk_steps"] = True
+        sched_init_args["steps_offset"] = 1
     elif train_scheduler == "lms":
         scheduler_cls = LMSDiscreteScheduler
     elif train_scheduler == "euler":
@@ -5779,9 +5782,6 @@ def get_my_scheduler(
         scheduler_cls = DDPMScheduler
     elif sample_sampler == "pndm":
         scheduler_cls = PNDMScheduler
-        sched_init_args["set_alpha_to_one"] = False
-        sched_init_args["skip_prk_steps"] = True
-        sched_init_args["steps_offset"] = 1
     elif sample_sampler == "lms" or sample_sampler == "k_lms":
         scheduler_cls = LMSDiscreteScheduler
     elif sample_sampler == "euler" or sample_sampler == "k_euler":
