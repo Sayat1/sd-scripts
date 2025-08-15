@@ -154,6 +154,13 @@ def _load_target_model(
         if text_encoder2.dtype != torch.float32:
             text_encoder2 = text_encoder2.to(dtype=torch.float32)
 
+        # fp16에서 Attempting to unscale FP16 gradients. 에러때문에 수정함
+        state_dict = unet.state_dict()
+        with init_empty_weights():
+            unet = UNet2DConditionModel.from_config(sdxl_model_util.DIFFUSERS_SDXL_UNET_CONFIG)  # overwrite unet
+        sdxl_model_util._load_state_dict_on_device(unet, state_dict, device=device, dtype=model_dtype)
+        logger.info("U-Net converted to original U-Net")
+
         # Diffusers U-Net to original U-Net
         # state_dict = sdxl_model_util.convert_diffusers_unet_state_dict_to_sdxl(unet.state_dict())
         # with init_empty_weights():
