@@ -5512,7 +5512,7 @@ def get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler):
     global sequential_step
     num_timestep = max_timestep - min_timestep
     if args.timestep_sampling == "sigmoid":
-        normal = torch.normal(args.sigmoid_bias, args.sigmoid_scale, (b_size,), device="cpu")
+        normal = torch.normal(args.sigmoid_bias, args.sigmoid_scale, (b_size,), device="cuda")
         t = normal.sigmoid()
     elif args.timestep_sampling == "increase":
         timesteps=[]
@@ -5521,7 +5521,7 @@ def get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler):
             sequential_step = sequential_step + 1
             if sequential_step == max_timestep:
                 sequential_step = min_timestep
-        return torch.tensor(timesteps, device="cpu")
+        return torch.tensor(timesteps, device="cuda")
     elif args.timestep_sampling == "decrease":
         timesteps=[]
         for i in range(b_size):
@@ -5529,7 +5529,7 @@ def get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler):
             if sequential_step < min_timestep:
                 sequential_step = max_timestep-1
             timesteps.append(sequential_step)
-        return torch.tensor(timesteps, device="cpu")
+        return torch.tensor(timesteps, device="cuda")
     elif args.timestep_sampling == "normal":
         global total_timesteps
         timesteps=[]
@@ -5538,15 +5538,15 @@ def get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler):
                 total_timesteps = [s for s in range(min_timestep,max_timestep)]
                 random.shuffle(total_timesteps)
             timesteps.append(total_timesteps.pop())
-        return torch.tensor(timesteps, device="cpu")
+        return torch.tensor(timesteps, device="cuda")
     elif args.timestep_sampling == "shift":
         shift = args.timestep_shift
-        logits_norm = torch.randn(b_size, device="cpu")
+        logits_norm = torch.randn(b_size, device="cuda")
         logits_norm = logits_norm * args.sigmoid_scale  # larger scale for more uniform sampling
         t_sigmoid = logits_norm.sigmoid()
         t = (t_sigmoid * shift) / (1 + (shift - 1) * t_sigmoid)
     else:
-        t = torch.rand((b_size,), device="cpu")
+        t = torch.rand((b_size,), device="cuda")
 
     indices = (t * (max_timestep - min_timestep) + min_timestep).long()
     timesteps = indices.to(device="cpu")
