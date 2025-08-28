@@ -5539,16 +5539,14 @@ def get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler):
                 random.shuffle(total_timesteps)
             timesteps.append(total_timesteps.pop())
         return torch.tensor(timesteps, device="cuda")
-    elif args.timestep_sampling == "shift":
-        shift = args.timestep_shift
-        logits_norm = torch.randn(b_size, device="cuda")
-        logits_norm = logits_norm * args.sigmoid_scale  # larger scale for more uniform sampling
-        t_sigmoid = logits_norm.sigmoid()
-        t = (t_sigmoid * shift) / (1 + (shift - 1) * t_sigmoid)
     else:
         t = torch.rand((b_size,), device="cuda")
 
-    indices = (t * (max_timestep - min_timestep) + min_timestep).long()
+    if args.timestep_sampling == "shift":
+        shift = args.timestep_shift
+        t = (t * shift) / (1 + (shift - 1) * t)
+
+    indices = (t * (max_timestep - min_timestep) + min_timestep).long().clamp(min_timestep,max_timestep-1)
     timesteps = indices.to(device="cpu")
     return timesteps
 
