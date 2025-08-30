@@ -5521,7 +5521,7 @@ def get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler):
             sequential_step = sequential_step + 1
             if sequential_step == max_timestep:
                 sequential_step = min_timestep
-        return torch.tensor(timesteps, device="cuda")
+        return torch.tensor(timesteps, device="cpu")
     elif args.timestep_sampling == "decrease":
         timesteps=[]
         for i in range(b_size):
@@ -5529,7 +5529,7 @@ def get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler):
             if sequential_step < min_timestep:
                 sequential_step = max_timestep-1
             timesteps.append(sequential_step)
-        return torch.tensor(timesteps, device="cuda")
+        return torch.tensor(timesteps, device="cpu")
     elif args.timestep_sampling == "normal":
         global total_timesteps
         timesteps=[]
@@ -5538,7 +5538,7 @@ def get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler):
                 total_timesteps = [s for s in range(min_timestep,max_timestep)]
                 random.shuffle(total_timesteps)
             timesteps.append(total_timesteps.pop())
-        return torch.tensor(timesteps, device="cuda")
+        return torch.tensor(timesteps, device="cpu")
     else:
         t = torch.rand((b_size,), device="cuda")
 
