@@ -470,7 +470,9 @@ class NetworkTrainer:
             accelerator.print("enable full bf16 training.")
             network.to(dtype=weight_dtype)
 
-        unet_weight_dtype = te_weight_dtype = weight_dtype
+        #sayat. te 32로 고정
+        unet_weight_dtype = weight_dtype
+        te_weight_dtype = torch.float32
         # Experimental Feature: Put base model into fp8 to save vram
         if args.fp8_base:
             assert torch.__version__ >= "2.1.0", "fp8_base requires torch>=2.1.0 / fp8を使う場合はtorch>=2.1.0が必要です。"
@@ -491,11 +493,9 @@ class NetworkTrainer:
                 param.requires_grad = False
             t_enc.text_model.embeddings.requires_grad_(False)
             # in case of cpu, dtype is already set to fp32 because cpu does not support fp8/fp16/bf16
-            if t_enc.device.type != "cpu":
-                t_enc.to(dtype=te_weight_dtype)
-                # nn.Embedding not support FP8
-                #임베딩은 안하기로
-                # t_enc.text_model.embeddings.to(dtype=(weight_dtype if te_weight_dtype != weight_dtype else te_weight_dtype))
+            t_enc.to(dtype=te_weight_dtype)
+            # nn.Embedding not support FP8
+            t_enc.text_model.embeddings.to(dtype=te_weight_dtype)
         del t_enc
 
         # acceleratorがなんかよろしくやってくれるらしい / accelerator will do something good
