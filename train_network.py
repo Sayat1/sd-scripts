@@ -1083,7 +1083,7 @@ class NetworkTrainer:
                     )
 
                     if args.masked_latents and ("alpha_masks" in batch and batch["alpha_masks"] is not None):
-                        noisy_latents = apply_masked_latents(noisy_latents, noise, batch, self.vae_scale_factor, args)
+                        noisy_latents = apply_masked_latents(noisy_latents, noise, batch, args)
 
                     if edm_training:
                         sigmas = train_util.get_sigmas(timesteps, noise_scheduler, latents.ndim, weight_dtype, accelerator.device)
