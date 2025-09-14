@@ -3668,6 +3668,13 @@ def add_masked_loss_arguments(parser: argparse.ArgumentParser):
         default=None,
         help="conditioning data directory / 条件付けデータのディレクトリ",
     )
+
+    parser.add_argument(
+        "--masked_latents",
+        action="store_true",
+        help="apply mask for blending noise to lantents. conditioning_data_dir is required for dataset. / 潜在変数にノイズをブレンドするためにマスクを適用する。datasetにはconditioning_data_dirが必要",
+    )
+
     parser.add_argument(
         "--masked_loss",
         action="store_true",

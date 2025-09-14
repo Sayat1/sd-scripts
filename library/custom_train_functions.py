@@ -719,6 +719,23 @@ def get_mask_weight(target, batch, face_weight=1.0, body_weight=1.0):
 
     return merged_mask_image
 
+def apply_masked_latents(noisy_latents, noise, batch, vae_scale, args):
+    if "alpha_masks" in batch and batch["alpha_masks"] is not None:
+        # alpha mask is 0 to 1
+        mask_image = batch["alpha_masks"].to(dtype=noisy_latents.dtype).unsqueeze(1) # add channel dimension
+        # print(f"mask_image: {mask_image.shape}, {mask_image.mean()}")
+    else:
+        return noisy_latents
+
+    # resize to the same size as the loss
+    mask_image = torch.nn.functional.interpolate(mask_image, size=noisy_latents.shape[2:], mode="area")
+    scaled_noise = noise * vae_scale
+    
+    noisy_latents = noisy_latents * mask_image + scaled_noise * (1 - mask_image)
+
+    return noisy_latents
+
+
 
 def apply_masked_loss(loss, batch, args):
     import torchvision.transforms.functional as TF

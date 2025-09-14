@@ -37,6 +37,7 @@ from library.custom_train_functions import (
     add_v_prediction_like_loss,
     apply_debiased_estimation,
     apply_masked_loss,
+    apply_masked_latents,
     get_mask_weight,
 )
 from library.utils import setup_logging, add_logging_arguments
@@ -1081,6 +1082,9 @@ class NetworkTrainer:
                         args, noise_scheduler, latents
                     )
 
+                    if args.masked_latents and ("alpha_masks" in batch and batch["alpha_masks"] is not None):
+                        noisy_latents = apply_masked_latents(noisy_latents, noise, batch, self.vae_scale_factor, args)
+
                     if edm_training:
                         sigmas = train_util.get_sigmas(timesteps, noise_scheduler, latents.ndim, weight_dtype, accelerator.device)
                         if 'flow' in args.train_scheduler: 
@@ -1091,22 +1095,16 @@ class NetworkTrainer:
                         else:
                             inp_noisy_latents = noisy_latents / ((sigmas**2 + 1) ** 0.5)
 
-                    #필요하진 않지만 확실하게
-                    noisy_latents.requires_grad_(train_unet)
-                    for t in text_encoder_conds:
-                        t.requires_grad_(train_text_encoder)
-                    if edm_training:
-                        inp_noisy_latents.requires_grad_(train_unet)
 
                     # ensure the hidden state will require grad
                     if args.gradient_checkpointing:
                         for x in noisy_latents:
-                            x.requires_grad_(train_unet) #무조건 True 대신 아마?        
+                            x.requires_grad_(False) #무조건 True 대신 아마?        
                         for t in text_encoder_conds:
                             t.requires_grad_(train_text_encoder) #무조건 True 대신 아마?
                         if edm_training:
                             for x in inp_noisy_latents:
-                                x.requires_grad_(train_unet) #무조건 True 대신 아마?
+                                x.requires_grad_(False) #무조건 True 대신 아마?
 
                     # Predict the noise residual
                     with accelerator.autocast():
@@ -1162,7 +1160,7 @@ class NetworkTrainer:
                     if weighting is not None:
                         loss = loss * weighting
 
-                    if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
+                    if args.masked_loss and ("alpha_masks" in batch and batch["alpha_masks"] is not None):
                         loss = apply_masked_loss(loss, batch, args)
                         
                     loss = loss.mean([1, 2, 3])
