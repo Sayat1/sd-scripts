@@ -719,6 +719,34 @@ def get_mask_weight(target, batch, face_weight=1.0, body_weight=1.0):
 
     return merged_mask_image
 
+def apply_random_background(latents, batch, random_bg_latents ,args):
+    import torchvision.transforms.functional as TF
+    if random_bg_latents is None:
+        return latents
+    if "alpha_masks" in batch and batch["alpha_masks"] is not None:
+        # alpha mask is 0 to 1
+        mask_image = batch["alpha_masks"].to(dtype=latents.dtype).unsqueeze(1) # add channel dimension
+        # print(f"mask_image: {mask_image.shape}, {mask_image.mean()}")
+    else:
+        return latents
+    
+    mask_image = torch.nn.functional.interpolate(mask_image, size=latents.shape[2:], mode="area")
+    mask_image = TF.gaussian_blur(mask_image, kernel_size=3, sigma=1.0)
+
+    batch_size = latents.shape[0]
+
+    #배치가 15부터 크면 문제일수도
+    idx = torch.randperm(random_bg_latents.size(0))[:batch_size]
+    selected_random_bg_latents = random_bg_latents[idx]
+    selected_random_bg_latents = torch.nn.functional.interpolate(selected_random_bg_latents, size=latents.shape[2:], mode="bilinear", align_corners=False)
+
+    latents = latents * mask_image + selected_random_bg_latents * (1 - mask_image)
+    return latents
+
+
+
+
+
 def apply_masked_latents(noisy_latents, noise, batch, args):
     if "alpha_masks" in batch and batch["alpha_masks"] is not None:
         # alpha mask is 0 to 1

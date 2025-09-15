@@ -2539,6 +2539,57 @@ def trim_and_resize_if_required(
     assert image.shape[0] == reso[1] and image.shape[1] == reso[0], f"internal error, illegal trimmed size: {image.shape}, {reso}"
     return image, original_size, crop_ltrb
 
+def create_random_bg_latents(vae, vae_dtype, weight_dtype, vae_scale_factor, args):
+    # 이미지 크기
+    width, height = 128, 128
+
+    # 밝은 색 범위 (RGB 값 180~255)
+    bright_min, bright_max = 180, 255
+
+    # 어두운 색 범위 (RGB 값 0~75)
+    dark_min, dark_max = 0, 75
+
+    midium_min, midium_max = 76, 179
+    background_raw_images = []
+    # 밝은 단색 10장
+    for i in range(5):
+        color = np.random.randint(bright_min, bright_max+1, size=3, dtype=np.uint8)
+        img = Image.new("RGB", (width, height), tuple(color))
+        background_raw_images.append(img)
+
+    # 밝은 단색 10장
+    for i in range(5):
+        color = np.random.randint(midium_min, midium_max+1, size=3, dtype=np.uint8)
+        img = Image.new("RGB", (width, height), tuple(color))
+        background_raw_images.append(img)
+
+    # 어두운 단색 10장
+    for i in range(5):
+        color = np.random.randint(dark_min, dark_max+1, size=3, dtype=np.uint8)
+        img = Image.new("RGB", (width, height), tuple(color))
+        background_raw_images.append(img)
+
+    background_raw_images = [IMAGE_TRANSFORMS(bg) for bg in background_raw_images]
+    background_images = torch.stack(background_raw_images, dim=0)
+
+    with torch.no_grad():
+        if args.vae_batch_size is None or len(background_images) <= args.vae_batch_size:
+            # latentに変換
+            latents = vae.encode(background_images.to(dtype=vae_dtype)).latent_dist.sample().to(dtype=weight_dtype)
+        else:
+            chunks = [background_images[i:i + args.vae_batch_size] for i in range(0, len(background_images), args.vae_batch_size)]
+            list_latents = []
+            for chunk in chunks:
+                # latentに変換
+                list_latents.append(vae.encode(chunk.to(dtype=vae_dtype)).latent_dist.sample().to(dtype=weight_dtype))
+            latents = torch.cat(list_latents, dim=0)
+            # NaNが含まれていれば警告を表示し0に置き換える
+        if torch.any(torch.isnan(latents)):
+            print("NaN found in latents, replacing with zeros")
+            latents = torch.nan_to_num(latents, 0, out=latents)
+        latents = latents * vae_scale_factor
+
+    return latents
 
 def cache_batch_latents(
     vae: AutoencoderKL, cache_to_disk: bool, image_infos: List[ImageInfo], flip_aug: bool, use_alpha_mask: bool, random_crop: bool
@@ -3667,6 +3718,12 @@ def add_masked_loss_arguments(parser: argparse.ArgumentParser):
         type=str,
         default=None,
         help="conditioning data directory / 条件付けデータのディレクトリ",
+    )
+
+    parser.add_argument(
+        "--masked_random_background",
+        action="store_true",
+        help="apply mask for blending noise to lantents. conditioning_data_dir is required for dataset. / 潜在変数にノイズをブレンドするためにマスクを適用する。datasetにはconditioning_data_dirが必要",
     )
 
     parser.add_argument(

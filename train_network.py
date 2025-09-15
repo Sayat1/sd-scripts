@@ -38,6 +38,7 @@ from library.custom_train_functions import (
     apply_debiased_estimation,
     apply_masked_loss,
     apply_masked_latents,
+    apply_random_background,
     get_mask_weight,
 )
 from library.utils import setup_logging, add_logging_arguments
@@ -926,6 +927,10 @@ class NetworkTrainer:
         # if edm_training and args.min_snr_gamma is not None:
         #     raise ValueError("Min-SNR formulation is not supported when conducting EDM-style training.")
         
+        random_bg_latents = None
+        if args.masked_random_background:
+            random_bg_latents = train_util.create_random_bg_latents(vae, vae_dtype, weight_dtype, self.vae_scale_factor, args)
+
         print(noise_scheduler) #for debugging
         if hasattr(noise_scheduler,'alphas_cumprod'):
             prepare_scheduler_for_custom_training(noise_scheduler, accelerator.device)
@@ -1075,6 +1080,9 @@ class NetworkTrainer:
                         text_encoder_conds = self.get_text_cond(
                             args, accelerator, batch, tokenizers, text_encoders, weight_dtype
                         )
+
+                    if args.masked_random_background and ("alpha_masks" in batch and batch["alpha_masks"] is not None):
+                        latents = apply_random_background(latents, batch, random_bg_latents ,args)
 
                     # Sample noise, sample a random timestep for each image, and add noise to the latents,
                     # with noise offset and/or multires noise if specified
