@@ -736,7 +736,7 @@ def apply_random_background(latents, batch, random_bg_latents ,args):
     batch_size = latents.shape[0]
 
     #배치가 15부터 크면 문제일수도
-    idx = torch.randperm(random_bg_latents.size(0))[:batch_size]
+    idx = torch.randperm(random_bg_latents.shape[0])[:batch_size]
     selected_random_bg_latents = random_bg_latents[idx]
     selected_random_bg_latents = torch.nn.functional.interpolate(selected_random_bg_latents, size=latents.shape[2:], mode="bilinear", align_corners=False)
 

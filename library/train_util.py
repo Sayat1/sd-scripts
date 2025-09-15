@@ -2571,6 +2571,7 @@ def create_random_bg_latents(vae, vae_dtype, weight_dtype, vae_scale_factor, arg
 
     background_raw_images = [IMAGE_TRANSFORMS(bg) for bg in background_raw_images]
     background_images = torch.stack(background_raw_images, dim=0)
+    background_images = background_images.to(device=vae.device, dtype=vae_dtype)
 
     with torch.no_grad():
         if args.vae_batch_size is None or len(background_images) <= args.vae_batch_size:
