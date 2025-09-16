@@ -1082,7 +1082,7 @@ class NetworkTrainer:
                         )
 
                     if args.masked_random_background and ("alpha_masks" in batch and batch["alpha_masks"] is not None):
-                        latents = apply_random_background(latents, batch, random_bg_latents ,args)
+                        latents = apply_random_background(latents, batch, random_bg_latents, args)
 
                     # Sample noise, sample a random timestep for each image, and add noise to the latents,
                     # with noise offset and/or multires noise if specified
