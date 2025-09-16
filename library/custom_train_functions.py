@@ -748,6 +748,7 @@ def apply_random_background(latents, batch, random_bg_latents ,args):
 
 
 def apply_masked_latents(noisy_latents, noise, batch, args):
+    import torchvision.transforms.functional as TF
     if "alpha_masks" in batch and batch["alpha_masks"] is not None:
         # alpha mask is 0 to 1
         mask_image = batch["alpha_masks"].to(dtype=noisy_latents.dtype).unsqueeze(1) # add channel dimension
@@ -757,6 +758,7 @@ def apply_masked_latents(noisy_latents, noise, batch, args):
 
     # resize to the same size as the loss
     mask_image = torch.nn.functional.interpolate(mask_image, size=noisy_latents.shape[2:], mode="area")
+    mask_image = TF.gaussian_blur(mask_image, kernel_size=3, sigma=1.0)
 
     noisy_latents = noisy_latents * mask_image + noise * (1 - mask_image)
 
