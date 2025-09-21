@@ -730,7 +730,7 @@ class BaseDataset(torch.utils.data.Dataset):
             if hasattr(subset, 'class_tokens'):
                 caption = subset.class_tokens
             else:
-                cpation = ""
+                caption = ""
         else:
             # process wildcards
             if subset.enable_wildcard:
@@ -2681,8 +2681,7 @@ def cache_batch_text_encoder_outputs(
             tokenizers[1],
             text_encoders[0],
             text_encoders[1],
-            dtype,
-            captions=info.caption
+            dtype
         )
 
         # ここでcpuに移動しておかないと、上書きされてしまう
