@@ -92,6 +92,35 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
             text_encoders[0].to(accelerator.device, dtype=weight_dtype)
             text_encoders[1].to(accelerator.device, dtype=weight_dtype)
 
+    def embedding_handler_init(self, text_encoders, tokenizers, args):
+        # we parse the provided token identifier (or identifiers) into a list. s.t. - "TOK" -> ["TOK"], "TOK,
+        # TOK2" -> ["TOK", "TOK2"] etc.
+        token_abstraction_list = "".join(args.token_abstraction.split()).split(",")
+        logger.info(f"list of token identifiers: {token_abstraction_list}")
+
+        self.token_abstraction_dict = {}
+        token_idx = 0
+        for i, token in enumerate(token_abstraction_list):
+            self.token_abstraction_dict[token] = [
+                f"<s{token_idx + i + j}>" for j in range(args.num_new_tokens_per_abstraction)
+            ]
+            token_idx += args.num_new_tokens_per_abstraction - 1
+
+        # replace instances of --token_abstraction in --instance_prompt with the new tokens: "<si><si+1>" etc.
+        # for token_abs, token_replacement in token_abstraction_dict.items():
+        #     args.instance_prompt = args.instance_prompt.replace(token_abs, "".join(token_replacement))
+        #     if args.with_prior_preservation:
+        #         args.class_prompt = args.class_prompt.replace(token_abs, "".join(token_replacement))
+        #     if args.validation_prompt:
+        #         args.validation_prompt = args.validation_prompt.replace(token_abs, "".join(token_replacement))
+        #         print("validation prompt:", args.validation_prompt)
+        # initialize the new tokens for textual inversion
+        self.embedding_handler = train_util.TokenEmbeddingsHandler(text_encoders, tokenizers)
+        inserting_toks = []
+        for new_tok in self.token_abstraction_dict.values():
+            inserting_toks.extend(new_tok)
+        self.embedding_handler.initialize_new_tokens(inserting_toks=inserting_toks)
+
     def get_text_cond(self, args, accelerator, batch, tokenizers, text_encoders, weight_dtype):
         if "text_encoder_outputs1_list" not in batch or batch["text_encoder_outputs1_list"] is None:
             input_ids1 = batch["input_ids"]

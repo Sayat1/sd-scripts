@@ -36,6 +36,7 @@ from tqdm import tqdm
 
 import torch
 from library.device_utils import init_ipex, clean_memory_on_device
+from safetensors.torch import load_file, save_file
 
 init_ipex()
 
@@ -611,6 +612,7 @@ class BaseDataset(torch.utils.data.Dataset):
         resolution: Optional[Tuple[int, int]],
         network_multiplier: float,
         debug_dataset: bool,
+        train_text_encoder_ti,
     ) -> None:
         super().__init__()
 
@@ -628,6 +630,8 @@ class BaseDataset(torch.utils.data.Dataset):
         self.tag_frequency = {}
         self.XTI_layers = None
         self.token_strings = None
+        self.token_abstraction_dict = None
+        self.train_text_encoder_ti = None
 
         self.enable_bucket = False
         self.bucket_manager: BucketManager = None  # not initialized
@@ -728,6 +732,10 @@ class BaseDataset(torch.utils.data.Dataset):
     def enable_XTI(self, layers=None, token_strings=None):
         self.XTI_layers = layers
         self.token_strings = token_strings
+
+    def enable_TI(self, train_text_encoder_ti, token_abstraction_dict):
+        self.train_text_encoder_ti = train_text_encoder_ti
+        self.token_abstraction_dict = token_abstraction_dict
 
     def add_replacement(self, str_from, str_to):
         self.replacements[str_from] = str_to
@@ -852,8 +860,10 @@ class BaseDataset(torch.utils.data.Dataset):
         if tokenizer is None:
             tokenizer = self.tokenizers[0]
 
+        add_special_tokens = True if self.train_text_encoder_ti else False
+
         input_ids = tokenizer(
-            caption, padding="max_length", truncation=True, max_length=self.tokenizer_max_length, return_tensors="pt"
+            caption, padding="max_length", truncation=True, max_length=self.tokenizer_max_length, add_special_tokens=add_special_tokens, return_tensors="pt"
         ).input_ids
 
         if self.tokenizer_max_length > tokenizer.model_max_length:
@@ -1392,6 +1402,10 @@ class BaseDataset(torch.utils.data.Dataset):
                         caption_layer.append(caption_)
                     captions.append(caption_layer)
                 else:
+                    if self.train_text_encoder_ti:
+                        # replace instances of --token_abstraction in caption with the new tokens: "<si><si+1>" etc.
+                        for token_abs, token_replacement in self.token_abstraction_dict.items():
+                            caption = caption.replace(token_abs, "".join(token_replacement))
                     captions.append(caption)
 
                 if not self.token_padding_disabled:  # this option might be omitted in future
@@ -1414,10 +1428,11 @@ class BaseDataset(torch.utils.data.Dataset):
         if len(text_encoder_outputs1_list) == 0:
             if self.token_padding_disabled:
                 # padding=True means pad in the batch
-                example["input_ids"] = self.tokenizer[0](captions, padding=True, truncation=True, return_tensors="pt").input_ids
+                add_special_tokens = True if self.train_text_encoder_ti else False
+                example["input_ids"] = self.tokenizer[0](captions, padding=True, truncation=True, add_special_tokens=add_special_tokens, return_tensors="pt").input_ids
                 if len(self.tokenizers) > 1:
                     example["input_ids2"] = self.tokenizer[1](
-                        captions, padding=True, truncation=True, return_tensors="pt"
+                        captions, padding=True, truncation=True, add_special_tokens=add_special_tokens, return_tensors="pt"
                     ).input_ids
                 else:
                     example["input_ids2"] = None
@@ -2242,6 +2257,105 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
     def disable_token_padding(self):
         for dataset in self.datasets:
             dataset.disable_token_padding()
+
+# Taken from https://github.com/replicate/cog-sdxl/blob/main/dataset_and_utils.py
+class TokenEmbeddingsHandler:
+    def __init__(self, text_encoders, tokenizers):
+        self.text_encoders = text_encoders
+        self.tokenizers = tokenizers
+
+        self.train_ids: Optional[torch.Tensor] = None
+        self.inserting_toks: Optional[List[str]] = None
+        self.embeddings_settings = {}
+
+    def initialize_new_tokens(self, inserting_toks: List[str]):
+        idx = 0
+        for tokenizer, text_encoder in zip(self.tokenizers, self.text_encoders):
+            assert isinstance(inserting_toks, list), "inserting_toks should be a list of strings."
+            assert all(isinstance(tok, str) for tok in inserting_toks), (
+                "All elements in inserting_toks should be strings."
+            )
+
+            self.inserting_toks = inserting_toks
+            special_tokens_dict = {"additional_special_tokens": self.inserting_toks}
+            tokenizer.add_special_tokens(special_tokens_dict)
+            text_encoder.resize_token_embeddings(len(tokenizer))
+
+            self.train_ids = tokenizer.convert_tokens_to_ids(self.inserting_toks)
+
+            # random initialization of new tokens
+            std_token_embedding = text_encoder.text_model.embeddings.token_embedding.weight.data.std()
+
+            print(f"{idx} text encoder's std_token_embedding: {std_token_embedding}")
+
+            text_encoder.text_model.embeddings.token_embedding.weight.data[self.train_ids] = (
+                torch.randn(len(self.train_ids), text_encoder.text_model.config.hidden_size)
+                .to(device=self.device)
+                .to(dtype=self.dtype)
+                * std_token_embedding
+            )
+            self.embeddings_settings[f"original_embeddings_{idx}"] = (
+                text_encoder.text_model.embeddings.token_embedding.weight.data.clone()
+            )
+            self.embeddings_settings[f"std_token_embedding_{idx}"] = std_token_embedding
+
+            inu = torch.ones((len(tokenizer),), dtype=torch.bool)
+            inu[self.train_ids] = False
+
+            self.embeddings_settings[f"index_no_updates_{idx}"] = inu
+
+            print(self.embeddings_settings[f"index_no_updates_{idx}"].shape)
+
+            idx += 1
+
+    def save_embeddings(self, file_path: str):
+        assert self.train_ids is not None, "Initialize new tokens before saving embeddings."
+        tensors = {}
+        # text_encoder_0 - CLIP ViT-L/14, text_encoder_1 -  CLIP ViT-G/14
+        idx_to_text_encoder_name = {0: "clip_l", 1: "clip_g"}
+        for idx, text_encoder in enumerate(self.text_encoders):
+            assert text_encoder.text_model.embeddings.token_embedding.weight.data.shape[0] == len(
+                self.tokenizers[0]
+            ), "Tokenizers should be the same."
+            new_token_embeddings = text_encoder.text_model.embeddings.token_embedding.weight.data[self.train_ids]
+
+            # New tokens for each text encoder are saved under "clip_l" (for text_encoder 0), "clip_g" (for
+            # text_encoder 1) to keep compatible with the ecosystem.
+            # Note: When loading with diffusers, any name can work - simply specify in inference
+            tensors[idx_to_text_encoder_name[idx]] = new_token_embeddings
+            # tensors[f"text_encoders_{idx}"] = new_token_embeddings
+
+        save_file(tensors, file_path)
+
+    @property
+    def dtype(self):
+        return self.text_encoders[0].dtype
+
+    @property
+    def device(self):
+        return self.text_encoders[0].device
+
+    @torch.no_grad()
+    def retract_embeddings(self):
+        for idx, text_encoder in enumerate(self.text_encoders):
+            index_no_updates = self.embeddings_settings[f"index_no_updates_{idx}"]
+            text_encoder.text_model.embeddings.token_embedding.weight.data[index_no_updates] = (
+                self.embeddings_settings[f"original_embeddings_{idx}"][index_no_updates]
+                .to(device=text_encoder.device)
+                .to(dtype=text_encoder.dtype)
+            )
+
+            # for the parts that were updated, we need to normalize them
+            # to have the same std as before
+            std_token_embedding = self.embeddings_settings[f"std_token_embedding_{idx}"]
+
+            index_updates = ~index_no_updates
+            new_embeddings = text_encoder.text_model.embeddings.token_embedding.weight.data[index_updates]
+            off_ratio = std_token_embedding / new_embeddings.std()
+
+            new_embeddings = new_embeddings * (off_ratio**0.1)
+            text_encoder.text_model.embeddings.token_embedding.weight.data[index_updates] = new_embeddings
+
 
 
 def is_disk_cached_latents_is_expected(reso, npz_path: str, flip_aug: bool, alpha_mask: bool):
@@ -3099,6 +3213,41 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
         type=float,
         help="Max gradient norm, 0 for no clipping / 勾配正規化の最大norm、0でclippingを行わない",
     )
+
+    parser.add_argument(
+        "--train_text_encoder_ti",
+        action="store_true",
+        help=("Whether to use textual inversion"),
+    )
+
+    parser.add_argument(
+        "--train_text_encoder_ti_frac",
+        type=float,
+        default=0.5,
+        help=("The percentage of epochs to perform textual inversion"),
+    )
+
+    parser.add_argument(
+        "--token_abstraction",
+        type=str,
+        default="TOK",
+        help="identifier specifying the instance(or instances) as used in instance_prompt, validation prompt, "
+        "captions - e.g. TOK. To use multiple identifiers, please specify them in a comma separated string - e.g. "
+        "'TOK,TOK2,TOK3' etc.",
+    )
+
+    parser.add_argument(
+        "--num_new_tokens_per_abstraction",
+        type=int,
+        default=2,
+        help="number of new tokens inserted to the tokenizers per token_abstraction identifier when "
+        "--train_text_encoder_ti = True. By default, each --token_abstraction (e.g. TOK) is mapped to 2 new "
+        "tokens - <si><si+1> ",
+    )
+
+    parser.add_argument(
+        "--textual_inversion_lr", type=float, default=2.0e-6, help="textual_inversion learning rate / 学習率"
+        )
 
     parser.add_argument(
         "--optimizer_args",
@@ -5112,11 +5261,12 @@ def get_hidden_states_sdxl(
     text_encoder2: CLIPTextModelWithProjection,
     weight_dtype: Optional[str] = None,
     accelerator: Optional[Accelerator] = None,
-    captions : Optional[str] = None
+    captions : Optional[str] = None,
+    train_text_encoder_ti : bool = False,
 ):
     if captions:
-        hidden_states1,_ = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer1,accelerator.unwrap_model(text_encoder1) if accelerator else text_encoder1,captions,accelerator.device if accelerator else 'cpu',1 if max_token_length is None else max_token_length//75,no_boseos_middle=True)
-        hidden_states2,pool2 = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer2,accelerator.unwrap_model(text_encoder2) if accelerator else text_encoder2,captions,accelerator.device if accelerator else 'cpu',1 if max_token_length is None else max_token_length//75,no_boseos_middle=True,pool_out=True)
+        hidden_states1,_ = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer1,accelerator.unwrap_model(text_encoder1) if accelerator else text_encoder1,captions,accelerator.device if accelerator else 'cpu',1 if max_token_length is None else max_token_length//75,no_boseos_middle=True,train_text_encoder_ti=train_text_encoder_ti)
+        hidden_states2,pool2 = custom_train_functions.get_weighted_text_embeddings_sdxl(tokenizer2,accelerator.unwrap_model(text_encoder2) if accelerator else text_encoder2,captions,accelerator.device if accelerator else 'cpu',1 if max_token_length is None else max_token_length//75,no_boseos_middle=True,pool_out=True,train_text_encoder_ti=train_text_encoder_ti)
         # if weight_dtype is not None:
         #     hidden_states1 = hidden_states1.to(dtype=weight_dtype)
         #     hidden_states2 = hidden_states2.to(dtype=weight_dtype)

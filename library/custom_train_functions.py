@@ -250,7 +250,7 @@ def parse_prompt_attention(text):
     return res
 
 
-def get_prompts_with_weights(tokenizer, prompt: List[str], max_length: int):
+def get_prompts_with_weights(tokenizer, prompt: List[str], max_length: int, train_text_encoder_ti: bool):
     r"""
     Tokenize a list of prompts and return its tokens with weights of each token.
 
@@ -259,13 +259,14 @@ def get_prompts_with_weights(tokenizer, prompt: List[str], max_length: int):
     tokens = []
     weights = []
     truncated = False
+    add_special_tokens = True if train_text_encoder_ti else False
     for text in prompt:
         texts_and_weights = parse_prompt_attention(text)
         text_token = []
         text_weight = []
         for word, weight in texts_and_weights:
             # tokenize and discard the starting and the ending token
-            token = tokenizer(word).input_ids[1:-1]
+            token = tokenizer(word,add_special_tokens=add_special_tokens).input_ids[1:-1]
             text_token += token
             # copy the weight by length of token
             text_weight += [weight] * len(token)
@@ -546,6 +547,7 @@ def get_weighted_text_embeddings_sdxl(
     max_embeddings_multiples: Optional[int] = 1,
     no_boseos_middle: Optional[bool] = True,
     pool_out: Optional[bool] = False,
+    train_text_encoder_ti: bool = False,
 ):
     r"""
     Prompts can be assigned with local weights using brackets. For example,
@@ -572,7 +574,7 @@ def get_weighted_text_embeddings_sdxl(
         prompt = [prompt]
 
     use_prompt_weighting = False
-    prompt_tokens, prompt_weights = get_prompts_with_weights(tokenizer, prompt, max_length - 2)
+    prompt_tokens, prompt_weights = get_prompts_with_weights(tokenizer, prompt, max_length - 2, train_text_encoder_ti=train_text_encoder_ti)
     # round up the longest length of tokens to a multiple of (model_max_length - 2)
     max_length = max([len(token) for token in prompt_tokens])
 

@@ -1,6 +1,7 @@
 import importlib
 import argparse
 import math
+import itertools
 import os
 import sys
 import random
@@ -289,6 +290,10 @@ class NetworkTrainer:
         if torch.__version__ >= "2.0.0":  # PyTorch 2.0.0 以上対応のxformersなら以下が使える
             vae.set_use_memory_efficient_attention_xformers(args.xformers)
 
+        if args.train_text_encoder_ti:
+            self.embedding_handler_init(text_encoders, tokenizers, args)
+            train_dataset_group.enable_TI(args.train_text_encoder_ti, self.token_abstraction_dict)
+
         # 差分追加学習のためにモデルを読み込む
         sys.path.append(os.path.dirname(__file__))
         accelerator.print("import network module:", args.network_module)
@@ -410,6 +415,14 @@ class NetworkTrainer:
             trainable_params = network.prepare_optimizer_params(text_encoder_lrs, args.unet_lr)
             lr_descriptions = None
 
+        if args.train_text_encoder_ti:
+            for text_encoder in text_encoders:
+                params = text_encoder.get_input_embeddings().parameters()
+                for param in params:
+                    param.data = param.to(dtype=torch.float32)
+                    param.requires_grad = True
+                trainable_params.append({"params":params,"lr":args.textual_inversion_lr})
+
         # if len(trainable_params) == 0:
         #     accelerator.print("no trainable parameters found / 学習可能なパラメータが見つかりませんでした")
         # for params in trainable_params:
@@ -483,7 +496,7 @@ class NetworkTrainer:
             t_enc.requires_grad_(False)
             for param in t_enc.parameters(): #그냥. 확인용
                 param.requires_grad = False
-            t_enc.text_model.embeddings.requires_grad_(False)
+            #t_enc.text_model.embeddings.requires_grad_(False)
             # in case of cpu, dtype is already set to fp32 because cpu does not support fp8/fp16/bf16
             if t_enc.device.type != "cpu":
                 t_enc.to(dtype=te_weight_dtype)
@@ -951,8 +964,10 @@ class NetworkTrainer:
 
         # function for saving/removing
         def save_model(ckpt_name, unwrapped_nw, steps, epoch_no, force_sync_upload=False):
+            from pathlib import Path
             os.makedirs(args.output_dir, exist_ok=True)
             ckpt_file = os.path.join(args.output_dir, ckpt_name)
+            ckpt_file_path = Path(ckpt_file)
 
             accelerator.print(f"\nsaving checkpoint: {ckpt_file}")
             metadata["ss_training_finished_at"] = str(time.time())
@@ -964,17 +979,29 @@ class NetworkTrainer:
             metadata_to_save.update(sai_metadata)
 
             unwrapped_nw.save_weights(ckpt_file, save_dtype, metadata_to_save)
+            if args.train_text_encoder_ti_frac:
+                self.embedding_handler.save_embeddings(f"{args.output_dir}/{ckpt_file_path.stem}_emb.safetensors")
             if args.huggingface_repo_id is not None:
                 huggingface_util.upload(args, ckpt_file, "/" + ckpt_name, force_sync_upload=force_sync_upload)
 
         def remove_model(old_ckpt_name):
+            from pathlib import Path
             old_ckpt_file = os.path.join(args.output_dir, old_ckpt_name)
+            old_ckpt_file_path = Path(old_ckpt_file)
             if os.path.exists(old_ckpt_file):
                 accelerator.print(f"removing old checkpoint: {old_ckpt_file}")
                 os.remove(old_ckpt_file)
+            if args.train_text_encoder_ti_frac:
+                old_emb_file = f"{args.output_dir}/{old_ckpt_file_path.stem}_emb.safetensors"
+                if os.path.exists(old_emb_file):
+                    accelerator.print(f"removing old emb: {old_ckpt_file}")
+                    os.remove(old_emb_file)
 
         # For --sample_at_first
         self.sample_images(accelerator, args, 0, global_step, accelerator.device, vae, tokenizer, text_encoder, unet)
+
+        if args.train_text_encoder_ti: 
+            num_train_epochs_text_encoder = int(args.train_text_encoder_ti_frac * num_train_epochs)
 
         # training loop
         if initial_step > 0:  # only if skip_until_initial_step is specified
@@ -983,6 +1010,7 @@ class NetworkTrainer:
                 initial_step -= len(train_dataloader)
             global_step = initial_step
 
+        pivoted = False
         for epoch in range(epoch_to_start, num_train_epochs):
             accelerator.print(f"\nepoch {epoch+1}/{num_train_epochs}")
             current_epoch.value = epoch + 1
@@ -1011,12 +1039,24 @@ class NetworkTrainer:
                 skipped_dataloader = accelerator.skip_first_batches(train_dataloader, initial_step - 1)
                 initial_step = 1
 
+            if args.train_text_encoder_ti:
+                if epoch >= num_train_epochs_text_encoder:
+                    print("PIVOT HALFWAY", epoch)
+                    pivoted = True
+
             for step, batch in enumerate(skipped_dataloader or train_dataloader):
                 optimizer_train_if_needed()
                 current_step.value = global_step
                 if initial_step > 0:
                     initial_step -= 1
                     continue
+
+                if pivoted:
+                    # stopping optimization of text_encoder params
+                    # re setting the optimizer to optimize only on unet params
+                    optimizer.param_groups[1]["lr"] = 0.0
+                    if len(text_encoder) > 1:
+                        optimizer.param_groups[2]["lr"] = 0.0
 
                 with accelerator.accumulate(training_model):
                     on_step_start(text_encoder, unet)
@@ -1181,11 +1221,17 @@ class NetworkTrainer:
                         self.all_reduce_network(accelerator, network)  # sync DDP grad manually
                         if args.max_grad_norm != 0.0:
                             params_to_clip = accelerator.unwrap_model(network).get_trainable_params()
+                            if args.train_text_encoder_ti:
+                                params_to_clip = itertools.chain(params_to_clip, accelerator.unwrap_model(text_encoder).get_input_embeddings().parameters())
                             accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
 
                     optimizer.step()
                     lr_scheduler.step()
                     optimizer.zero_grad(set_to_none=True)
+
+                    # every step, we reset the embeddings to the original embeddings.
+                    if args.train_text_encoder_ti:
+                        self.embedding_handler.retract_embeddings()
 
                 if args.scale_weight_norms:
                     keys_scaled, mean_norm, maximum_norm = accelerator.unwrap_model(network).apply_max_norm_regularization(
