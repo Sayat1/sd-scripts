@@ -751,7 +751,7 @@ class BaseDataset(torch.utils.data.Dataset):
             if hasattr(subset, 'class_tokens'):
                 caption = subset.class_tokens
             else:
-                cpation = ""
+                caption = ""
         else:
             # process wildcards
             if subset.enable_wildcard:
@@ -2650,8 +2650,7 @@ def cache_batch_text_encoder_outputs(
             tokenizers[1],
             text_encoders[0],
             text_encoders[1],
-            dtype,
-            captions=info.caption
+            dtype
         )
 
         # ここでcpuに移動しておかないと、上書きされてしまう
@@ -5504,7 +5503,7 @@ def get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler):
     global sequential_step
     num_timestep = max_timestep - min_timestep
     if args.timestep_sampling == "sigmoid":
-        normal = torch.normal(args.sigmoid_bias, args.sigmoid_scale, (b_size,), device="cpu")
+        normal = torch.normal(args.sigmoid_bias, args.sigmoid_scale, (b_size,), device="cuda")
         t = normal.sigmoid()
     elif args.timestep_sampling == "increase":
         timesteps=[]
@@ -5531,16 +5530,14 @@ def get_timesteps(args, min_timestep, max_timestep, b_size, noise_scheduler):
                 random.shuffle(total_timesteps)
             timesteps.append(total_timesteps.pop())
         return torch.tensor(timesteps, device="cpu")
-    elif args.timestep_sampling == "shift":
-        shift = args.timestep_shift
-        logits_norm = torch.randn(b_size, device="cpu")
-        logits_norm = logits_norm * args.sigmoid_scale  # larger scale for more uniform sampling
-        t_sigmoid = logits_norm.sigmoid()
-        t = (t_sigmoid * shift) / (1 + (shift - 1) * t_sigmoid)
     else:
-        t = torch.rand((b_size,), device="cpu")
+        t = torch.rand((b_size,), device="cuda")
 
-    indices = (t * (max_timestep - min_timestep) + min_timestep).long()
+    if args.timestep_sampling == "shift":
+        shift = args.timestep_shift
+        t = (t * shift) / (1 + (shift - 1) * t)
+
+    indices = (t * (max_timestep - min_timestep) + min_timestep).long().clamp(min_timestep,max_timestep-1)
     timesteps = indices.to(device="cpu")
     return timesteps
 
@@ -5698,6 +5695,9 @@ def create_train_scheduler(args):
         scheduler_cls = DDPMScheduler
     elif train_scheduler == "pndm":
         scheduler_cls = PNDMScheduler
+        sched_init_args["set_alpha_to_one"] = False
+        sched_init_args["skip_prk_steps"] = True
+        sched_init_args["steps_offset"] = 1
     elif train_scheduler == "lms":
         scheduler_cls = LMSDiscreteScheduler
     elif train_scheduler == "euler":
