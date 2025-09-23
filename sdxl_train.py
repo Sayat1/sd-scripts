@@ -825,6 +825,20 @@ def train(args):
             loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
             avr_loss: float = loss_recorder.moving_average
             logs = {"avr_loss": avr_loss}  # , "lr": lr_scheduler.get_last_lr()[0]}
+            lrs = lr_scheduler.get_last_lr()
+            for i, lr in enumerate(lrs):
+                logs[f"lr/group{i}"] = lr
+                if args.optimizer_type.lower().startswith("DAdapt".lower()) or "Prodigy".lower() in args.optimizer_type.lower():
+                    if args.optimizer_type.lower().endswith("schedulefree"):
+                        logs[f"lr/d*lr/group{i}"] = (
+                            lr_scheduler.optimizer.param_groups[i]["d"] * lr_scheduler.optimizer.param_groups[i]["lr"]
+                        )
+
+                    else:
+                        logs[f"lr/d*lr/group{i}"] = (
+                            lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
+                        )
+
             progress_bar.set_postfix(**logs)
 
             if global_step >= args.max_train_steps:
