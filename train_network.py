@@ -81,7 +81,7 @@ class NetworkTrainer:
 
         lrs = lr_scheduler.get_last_lr()
         for i, lr in enumerate(lrs):
-            if lr_descriptions is not None:
+            if lr_descriptions is not None and len(lr_descriptions) > i:
                 lr_desc = lr_descriptions[i]
             else:
                 lr_desc = f"group{i}"
@@ -389,7 +389,7 @@ class NetworkTrainer:
 
         if args.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
-            for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
+            for t_enc in text_encoders:
                 t_enc.gradient_checkpointing_enable()
             del t_enc
             network.enable_gradient_checkpointing()  # may have no effect
@@ -417,11 +417,12 @@ class NetworkTrainer:
 
         if args.train_text_encoder_ti:
             for text_encoder in text_encoders:
-                params = text_encoder.get_input_embeddings().parameters()
-                for param in params:
+                ti_params = []
+                ti_params += text_encoder.get_input_embeddings().parameters()
+                for param in ti_params:
                     param.data = param.to(dtype=torch.float32)
                     param.requires_grad = True
-                trainable_params.append({"params":params,"lr":args.textual_inversion_lr})
+                trainable_params.append({"params":ti_params,"lr":args.textual_inversion_lr})
 
         # if len(trainable_params) == 0:
         #     accelerator.print("no trainable parameters found / 学習可能なパラメータが見つかりませんでした")
@@ -489,20 +490,9 @@ class NetworkTrainer:
             te_weight_dtype = torch.float8_e4m3fn
 
         unet.requires_grad_(False)
-        for param in unet.parameters(): #그냥. 확인용
-            param.requires_grad = False
         unet.to(dtype=unet_weight_dtype)
         for t_enc in text_encoders:
             t_enc.requires_grad_(False)
-            for param in t_enc.parameters(): #그냥. 확인용
-                param.requires_grad = False
-            #t_enc.text_model.embeddings.requires_grad_(False)
-            # in case of cpu, dtype is already set to fp32 because cpu does not support fp8/fp16/bf16
-            if t_enc.device.type != "cpu":
-                t_enc.to(dtype=te_weight_dtype)
-                # nn.Embedding not support FP8
-                #임베딩은 안하기로
-                # t_enc.text_model.embeddings.to(dtype=(weight_dtype if te_weight_dtype != weight_dtype else te_weight_dtype))
         del t_enc
 
         # acceleratorがなんかよろしくやってくれるらしい / accelerator will do something good
@@ -522,9 +512,9 @@ class NetworkTrainer:
                 unet = accelerator.prepare(unet)
             else:
                 unet.to(accelerator.device, dtype=unet_weight_dtype)  # move to device because unet is not prepared by accelerator
-            if train_text_encoder:
+            if train_text_encoder or args.train_text_encoder_ti:
                 if len(text_encoders) > 1:
-                    text_encoder = text_encoders = [accelerator.prepare(t_enc) if t_te else t_enc for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True)]
+                    text_encoder = text_encoders = [accelerator.prepare(t_enc) for t_enc in text_encoders]
                 else:
                     text_encoder = accelerator.prepare(text_encoder)
                     text_encoders = [text_encoder]
@@ -541,27 +531,6 @@ class NetworkTrainer:
         else:
             optimizer_train_if_needed = lambda: None
             optimizer_eval_if_needed = lambda: None
-
-        # if args.gradient_checkpointing:
-        #     # according to TI example in Diffusers, train is required
-        #     unet.train()
-
-        #     for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
-        #         if not t_te:
-        #             continue
-        #         t_enc.train()
-
-        #         # set top parameter requires_grad = True for gradient checkpointing works
-        #         t_enc.text_model.embeddings.requires_grad_(True)
-
-        # else:
-        #     unet.eval()
-        #     for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
-        #         if not t_te:
-        #             continue
-        #         t_enc.eval()
-
-        # del t_enc
 
         accelerator.unwrap_model(network).prepare_grad_etc(text_encoder, unet)
 
@@ -1025,11 +994,13 @@ class NetworkTrainer:
 
             if train_unet:
                 accelerator.unwrap_model(network).on_epoch_start(unet)
+                unet.train()
             if train_text_encoder:
                 accelerator.unwrap_model(network).on_epoch_start(text_encoder)
                 for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
                     if not t_te:
                         continue
+                    t_enc.train()
                     # set top parameter requires_grad = True for gradient checkpointing works
                     accelerator.unwrap_model(t_enc).text_model.embeddings.requires_grad_(True)
                 del t_enc
@@ -1040,6 +1011,7 @@ class NetworkTrainer:
                 initial_step = 1
 
             if args.train_text_encoder_ti:
+                [t_enc.train() for t_enc in text_encoders]
                 if epoch >= num_train_epochs_text_encoder:
                     print("PIVOT HALFWAY", epoch)
                     pivoted = True
@@ -1055,7 +1027,7 @@ class NetworkTrainer:
                     # stopping optimization of text_encoder params
                     # re setting the optimizer to optimize only on unet params
                     optimizer.param_groups[1]["lr"] = 0.0
-                    if len(text_encoder) > 1:
+                    if len(text_encoders) > 1:
                         optimizer.param_groups[2]["lr"] = 0.0
 
                 with accelerator.accumulate(training_model):
@@ -1125,23 +1097,6 @@ class NetworkTrainer:
                             inp_noisy_latents = noise_scheduler.precondition_inputs(noisy_latents, sigmas)
                         else:
                             inp_noisy_latents = noisy_latents / ((sigmas**2 + 1) ** 0.5)
-
-                    #필요하진 않지만 확실하게
-                    noisy_latents.requires_grad_(train_unet)
-                    for t in text_encoder_conds:
-                        t.requires_grad_(train_text_encoder)
-                    if edm_training:
-                        inp_noisy_latents.requires_grad_(train_unet)
-
-                    # ensure the hidden state will require grad
-                    if args.gradient_checkpointing:
-                        for x in noisy_latents:
-                            x.requires_grad_(train_unet) #무조건 True 대신 아마?        
-                        for t in text_encoder_conds:
-                            t.requires_grad_(train_text_encoder) #무조건 True 대신 아마?
-                        if edm_training:
-                            for x in inp_noisy_latents:
-                                x.requires_grad_(train_unet) #무조건 True 대신 아마?
 
                     # Predict the noise residual
                     with accelerator.autocast():
@@ -1222,7 +1177,8 @@ class NetworkTrainer:
                         if args.max_grad_norm != 0.0:
                             params_to_clip = accelerator.unwrap_model(network).get_trainable_params()
                             if args.train_text_encoder_ti:
-                                params_to_clip = itertools.chain(params_to_clip, accelerator.unwrap_model(text_encoder).get_input_embeddings().parameters())
+                                for te in text_encoders:
+                                    params_to_clip = itertools.chain(params_to_clip, accelerator.unwrap_model(te).get_input_embeddings().parameters())
                             accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
 
                     optimizer.step()

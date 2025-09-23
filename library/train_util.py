@@ -612,7 +612,6 @@ class BaseDataset(torch.utils.data.Dataset):
         resolution: Optional[Tuple[int, int]],
         network_multiplier: float,
         debug_dataset: bool,
-        train_text_encoder_ti,
     ) -> None:
         super().__init__()
 
@@ -2215,6 +2214,10 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
     def enable_XTI(self, *args, **kwargs):
         for dataset in self.datasets:
             dataset.enable_XTI(*args, **kwargs)
+
+    def enable_TI(self, *args, **kwargs):
+        for dataset in self.datasets:
+            dataset.enable_TI(*args, **kwargs)
 
     def cache_latents(self, vae, vae_batch_size=1, cache_to_disk=False, is_main_process=True):
         for i, dataset in enumerate(self.datasets):
