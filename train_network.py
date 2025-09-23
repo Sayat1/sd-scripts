@@ -332,6 +332,12 @@ class NetworkTrainer:
 
             accelerator.wait_for_everyone()
 
+        unet.requires_grad_(False)
+        unet.to(dtype=unet_weight_dtype)
+        for t_enc in text_encoders:
+            t_enc.requires_grad_(False)
+        del t_enc
+
         # 必要ならテキストエンコーダーの出力をキャッシュする: Text Encoderはcpuまたはgpuへ移される
         # cache text encoder outputs if needed: Text Encoder is moved to cpu or gpu
         self.cache_text_encoder_outputs_if_needed(
@@ -488,12 +494,6 @@ class NetworkTrainer:
             accelerator.print("enable fp8 training.")
             unet_weight_dtype = torch.float8_e4m3fn
             te_weight_dtype = torch.float8_e4m3fn
-
-        unet.requires_grad_(False)
-        unet.to(dtype=unet_weight_dtype)
-        for t_enc in text_encoders:
-            t_enc.requires_grad_(False)
-        del t_enc
 
         # acceleratorがなんかよろしくやってくれるらしい / accelerator will do something good
         use_schedule_free_optimizer = args.optimizer_type.lower().endswith("schedulefree")
