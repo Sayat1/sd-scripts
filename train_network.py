@@ -131,7 +131,7 @@ class NetworkTrainer:
         return False
 
     def is_train_text_encoder(self, args):
-        return not args.network_train_unet_only and not self.is_text_encoder_outputs_cached(args)
+        return (not args.network_train_unet_only and not self.is_text_encoder_outputs_cached(args)) or args.train_text_encoder_ti
 
     def cache_text_encoder_outputs_if_needed(
         self, args, accelerator, unet, vae, tokenizers, text_encoders, data_loader, weight_dtype
@@ -1015,7 +1015,7 @@ class NetworkTrainer:
 
             if args.train_text_encoder_ti:
                 [t_enc.train() for t_enc in text_encoders]
-                if epoch >= num_train_epochs_text_encoder:
+                if epoch >= num_train_epochs_text_encoder and pivoted==False:
                     print("PIVOT HALFWAY", epoch)
                     pivoted = True
 
@@ -1029,9 +1029,9 @@ class NetworkTrainer:
                 if pivoted:
                     # stopping optimization of text_encoder params
                     # re setting the optimizer to optimize only on unet params
-                    optimizer.param_groups[1]["lr"] = 0.0
+                    lr_scheduler.scheduler.base_lrs[1] = 0.0
                     if len(text_encoders) > 1:
-                        optimizer.param_groups[2]["lr"] = 0.0
+                        lr_scheduler.scheduler.base_lrs[2] = 0.0
 
                 with accelerator.accumulate(training_model):
                     on_step_start(text_encoder, unet)
