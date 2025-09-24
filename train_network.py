@@ -951,7 +951,7 @@ class NetworkTrainer:
             metadata_to_save.update(sai_metadata)
 
             unwrapped_nw.save_weights(ckpt_file, save_dtype, metadata_to_save)
-            if args.train_text_encoder_ti_frac:
+            if args.train_text_encoder_ti:
                 self.embedding_handler.save_embeddings(f"{args.output_dir}/{ckpt_file_path.stem}_emb.safetensors")
             if args.huggingface_repo_id is not None:
                 huggingface_util.upload(args, ckpt_file, "/" + ckpt_name, force_sync_upload=force_sync_upload)
@@ -963,7 +963,7 @@ class NetworkTrainer:
             if os.path.exists(old_ckpt_file):
                 accelerator.print(f"removing old checkpoint: {old_ckpt_file}")
                 os.remove(old_ckpt_file)
-            if args.train_text_encoder_ti_frac:
+            if args.train_text_encoder_ti:
                 old_emb_file = f"{args.output_dir}/{old_ckpt_file_path.stem}_emb.safetensors"
                 if os.path.exists(old_emb_file):
                     accelerator.print(f"removing old emb: {old_ckpt_file}")
