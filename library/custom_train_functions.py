@@ -713,6 +713,7 @@ def apply_noise_offset(latents, noise, noise_offset, adaptive_noise_scale, gener
         noise_offset = noise_offset + adaptive_noise_scale * latent_mean
         noise_offset = torch.clamp(noise_offset, 0.0, None)  # in case of adaptive noise scale is negative
 
+    # 낮은 타임스탭에서는 낮게 높은 타임스탭에서는 높은 noise offset을 적용
     if generalized_offset_noise and timestep is not None and betas is not None:
         psi_schedule = compute_and_cache_offset_noise_psi_schedule(betas).to(timestep.device)
         psi_t = psi_schedule[timestep]

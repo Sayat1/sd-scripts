@@ -3649,7 +3649,7 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
     parser.add_argument(
         "--generalized_offset_noise",
         action="store_true",
-        help="Per-timestep 'brightness knob' instead of a fixed offset - steadier training, better starts, and improved very dark/bright images. Compatible with V-pred and Eps-pred. Start with 0.02 and adjust as needed.",
+        help="Per-timestep 'brightness knob' instead of a fixed offset - steadier training, better starts, and improved very dark/bright images. Compatible with V-pred and Eps-pred. Start with 0.02 and adjust as needed. 낮은 타임스탭에서는 낮게 높은 타임스탭에서는 높은 noise offset을 적용",
     )
 
     parser.add_argument(
