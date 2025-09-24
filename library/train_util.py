@@ -3645,6 +3645,13 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         default=None,
         help="enable noise offset with this value (if enabled, around 0.1 is recommended) / Noise offsetを有効にしてこの値を設定する（有効にする場合は0.1程度を推奨）",
     )
+
+    parser.add_argument(
+        "--generalized_offset_noise",
+        action="store_true",
+        help="Per-timestep 'brightness knob' instead of a fixed offset - steadier training, better starts, and improved very dark/bright images. Compatible with V-pred and Eps-pred. Start with 0.02 and adjust as needed.",
+    )
+
     parser.add_argument(
         "--noise_offset_random_strength",
         action="store_true",
@@ -5721,6 +5728,13 @@ def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler,
 
 
 def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
+    # Sample a random timestep for each image
+    b_size = latents.shape[0]
+    min_timestep = 0 if args.min_timestep is None else args.min_timestep
+    max_timestep = noise_scheduler.config.num_train_timesteps if args.max_timestep is None else args.max_timestep
+
+    timesteps, huber_c = get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, latents.device)
+
     # Sample noise that we'll add to the latents
     noise = torch.randn_like(latents, device=latents.device)
     if args.noise_offset:
@@ -5728,18 +5742,11 @@ def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
             noise_offset = torch.rand(1, device=latents.device) * args.noise_offset
         else:
             noise_offset = args.noise_offset
-        noise = custom_train_functions.apply_noise_offset(latents, noise, noise_offset, args.adaptive_noise_scale)
+        noise = custom_train_functions.apply_noise_offset(latents, noise, noise_offset, args.adaptive_noise_scale, args.generalized_offset_noise, timesteps, noise_scheduler.betas)
     if args.multires_noise_iterations:
         noise = custom_train_functions.pyramid_noise_like(
             noise, latents.device, args.multires_noise_iterations, args.multires_noise_discount
         )
-
-    # Sample a random timestep for each image
-    b_size = latents.shape[0]
-    min_timestep = 0 if args.min_timestep is None else args.min_timestep
-    max_timestep = noise_scheduler.config.num_train_timesteps if args.max_timestep is None else args.max_timestep
-
-    timesteps, huber_c = get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, latents.device)
 
     noisy_latents = None
     if 'flow' not in args.train_scheduler:

@@ -641,9 +641,67 @@ def pyramid_noise_like(noise, device, iterations=6, discount=0.4):
             break  # Lowest resolution is 1x1
     return noise / noise.std()  # Scaled back to roughly unit variance
 
+_offset_noise_psi_schedule = None
+def compute_and_cache_offset_noise_psi_schedule(betas: torch.Tensor) -> torch.Tensor:
+    global _offset_noise_psi_schedule
+    """
+    Computes the time-dependent psi_t coefficients for generalized offset noise.
+    This implementation follows the paper "Generalized Diffusion Model with Adjusted Offset Noise",
+    specifically Equation (34) and the logic of Algorithm 1 for the "balanced-phi_t, psi_t strategy".
+    """
+    if _offset_noise_psi_schedule is not None and _offset_noise_psi_schedule.shape[0] == betas.shape[0]:
+        return _offset_noise_psi_schedule.to(betas.device).to(torch.float64)
+
+    betas = betas.to(torch.float64)
+    T = betas.shape[0]
+    alphas = 1.0 - betas
+    alphas_cumprod = torch.cumprod(alphas, dim=0)
+
+    # From paper footnote 4: "we introduce α_0 = 1 for convenience".
+    alphas_with_zero = torch.cat([torch.tensor([1.0], device=betas.device, dtype=betas.dtype), alphas])
+
+    # --- Start of Algorithm 1 ---
+    gammas = torch.zeros(T, device=betas.device, dtype=betas.dtype)
+
+    # Step 1: Set gamma_1 = 1
+    gammas[0] = 1.0
+
+    # This sum is `Σ_{i=1 to t-1} γ_i/√α_{i-1}` which we build iteratively.
+    cumulative_sum_term = gammas[0] / torch.sqrt(alphas_with_zero[0])
+
+    # Step 2-4: Loop for t = 2 to T (in code: t = 1 to T-1)
+    for t in range(1, T):
+        alpha_t = alphas[t]
+        alpha_tm1 = alphas[t - 1]
+
+        # Denominator from the paper's formula for C_t.
+        c_t_denominator = alpha_t * (1 - alpha_tm1)
+        c_t = (1 - alpha_t) * torch.sqrt(alpha_tm1) / c_t_denominator
+
+        # Paper's recursive formula uses the full cumulative sum.
+        gammas[t] = c_t * cumulative_sum_term
+
+        # Update the sum for the next iteration.
+        cumulative_sum_term += gammas[t] / torch.sqrt(alphas_with_zero[t])
+
+    # Step 5: Calculate normalization factor psi_T
+    psi_T_denominator = torch.sqrt(1 - alphas_cumprod[-1])
+    psi_T = cumulative_sum_term / psi_T_denominator
+
+    # Step 6-8: Normalize gammas
+    gammas_normalized = gammas / psi_T
+    # --- End of Algorithm 1 ---
+
+    # Finally, calculate the psi schedule for all timesteps t using Equation (22)
+    terms = gammas_normalized / torch.sqrt(alphas_with_zero[:-1])
+    s_cumulative = torch.cumsum(terms, dim=0)
+    psi_schedule = s_cumulative / torch.sqrt(1 - alphas_cumprod)
+
+    _offset_noise_psi_schedule = psi_schedule.to(betas.device)
+    return _offset_noise_psi_schedule
 
 # https://www.crosslabs.org//blog/diffusion-with-offset-noise
-def apply_noise_offset(latents, noise, noise_offset, adaptive_noise_scale):
+def apply_noise_offset(latents, noise, noise_offset, adaptive_noise_scale, generalized_offset_noise, timestep=None, betas=None):
     if noise_offset is None:
         return noise
     if adaptive_noise_scale is not None:
@@ -654,6 +712,13 @@ def apply_noise_offset(latents, noise, noise_offset, adaptive_noise_scale):
         # multiply adaptive noise scale to the mean value and add it to the noise offset
         noise_offset = noise_offset + adaptive_noise_scale * latent_mean
         noise_offset = torch.clamp(noise_offset, 0.0, None)  # in case of adaptive noise scale is negative
+
+    if generalized_offset_noise and timestep is not None and betas is not None:
+        psi_schedule = compute_and_cache_offset_noise_psi_schedule(betas).to(timestep.device)
+        psi_t = psi_schedule[timestep]
+        psi_t = psi_t.view(psi_t.shape[0], *[1 for _ in range(latents.ndim - 1)])
+        # Scale by the time-dependent psi_t factor
+        noise_offset = psi_t * noise_offset
 
     noise = noise + noise_offset * torch.randn((latents.shape[0], latents.shape[1], 1, 1), device=latents.device)
     return noise
