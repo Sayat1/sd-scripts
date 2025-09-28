@@ -995,10 +995,8 @@ class NetworkTrainer:
 
             metadata["ss_epoch"] = str(epoch + 1)
 
-            if train_unet:
-                accelerator.unwrap_model(network).on_epoch_start(unet)
+            accelerator.unwrap_model(network).on_epoch_start(text_encoder,unet)
             if train_text_encoder:
-                accelerator.unwrap_model(network).on_epoch_start(text_encoder)
                 for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
                     if not t_te:
                         continue
