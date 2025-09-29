@@ -214,6 +214,13 @@ class LoRAModule(torch.nn.Module):
                 approx_grad = self.scale * ((self.lora_up.weight @ lora_down_grad) + (lora_up_grad @ self.lora_down.weight))
                 self.grad_norms = torch.norm(approx_grad, dim=1, keepdim=True)
 
+    @property
+    def device(self):
+        return next(self.parameters()).device
+    
+    @property
+    def dtype(self):
+        return next(self.parameters()).dtype
 
 class LoRAInfModule(LoRAModule):
     def __init__(
