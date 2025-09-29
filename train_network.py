@@ -1180,6 +1180,10 @@ class NetworkTrainer:
                         if args.max_grad_norm != 0.0:
                             params_to_clip = accelerator.unwrap_model(network).get_trainable_params()
                             accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+                        if hasattr(network, "update_grad_norms"):
+                            network.update_grad_norms()
+                        if hasattr(network, "update_norms"):
+                            network.update_norms()
 
                     optimizer.step()
                     lr_scheduler.step()
