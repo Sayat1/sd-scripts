@@ -567,6 +567,15 @@ def create_network(
     if module_dropout is not None:
         module_dropout = float(module_dropout)
 
+    ggpo_beta = kwargs.get("ggpo_beta", None)
+    ggpo_sigma = kwargs.get("ggpo_sigma", None)
+
+    if ggpo_beta is not None:
+        ggpo_beta = float(ggpo_beta)
+
+    if ggpo_sigma is not None:
+        ggpo_sigma = float(ggpo_sigma)
+
     # すごく引数が多いな ( ^ω^)･･･
     network = LoRANetwork(
         text_encoder,
@@ -585,6 +594,8 @@ def create_network(
         conv_block_alphas=conv_block_alphas,
         varbose=True,
         is_sdxl=is_sdxl,
+        ggpo_beta=ggpo_beta,
+        ggpo_sigma=ggpo_sigma,
     )
 
     loraplus_lr_ratio = kwargs.get("loraplus_lr_ratio", None)
@@ -989,6 +1000,8 @@ class LoRANetwork(torch.nn.Module):
         module_class: Type[object] = LoRAModule,
         varbose: Optional[bool] = False,
         is_sdxl: Optional[bool] = False,
+        ggpo_beta: Optional[float] = None,
+        ggpo_sigma: Optional[float] = None,
     ) -> None:
         """
         LoRA network: すごく引数が多いが、パターンは以下の通り
@@ -1034,6 +1047,9 @@ class LoRANetwork(torch.nn.Module):
                 logger.info(
                     f"apply LoRA to Conv2d with kernel size (3,3). dim (rank): {self.conv_lora_dim}, alpha: {self.conv_alpha}"
                 )
+
+        if ggpo_beta is not None and ggpo_sigma is not None:
+            logger.info(f"LoRA-GGPO training sigma: {ggpo_sigma} beta: {ggpo_beta}")
 
         # create module instances
         def create_modules(
@@ -1105,6 +1121,8 @@ class LoRANetwork(torch.nn.Module):
                                 dropout=dropout,
                                 rank_dropout=rank_dropout,
                                 module_dropout=module_dropout,
+                                ggpo_beta=ggpo_beta,
+                                ggpo_sigma=ggpo_sigma,
                             )
                             loras.append(lora)
             return loras, skipped
