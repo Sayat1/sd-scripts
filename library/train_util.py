@@ -3427,6 +3427,7 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
             "ddim",
             "pndm",
             "lms",
+            "lcm",
             "edmeuler",
             "flow_euler",
             "euler",
