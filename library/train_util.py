@@ -57,6 +57,7 @@ from diffusers import (
     DPMSolverMultistepScheduler,
     DPMSolverSinglestepScheduler,
     LMSDiscreteScheduler,
+    LCMScheduler,
     PNDMScheduler,
     DDIMScheduler,
     EulerDiscreteScheduler,
@@ -5700,6 +5701,8 @@ def create_train_scheduler(args):
         sched_init_args["steps_offset"] = 1
     elif train_scheduler == "lms":
         scheduler_cls = LMSDiscreteScheduler
+    elif train_scheduler == "lcm":
+        scheduler_cls = LCMScheduler
     elif train_scheduler == "euler":
         scheduler_cls = EulerDiscreteScheduler
     elif train_scheduler == "euler_a":
