@@ -150,7 +150,7 @@ class LoRAModule(torch.nn.Module):
             return org_forwarded + lx * self.multiplier * scale
 
     @torch.no_grad()
-    def initialize_norm_cache(self, org_module_weight: Tensor):
+    def initialize_norm_cache(self, org_module_weight: torch.Tensor):
         # Choose a reasonable sample size
         n_rows = org_module_weight.shape[0]
         sample_size = min(1000, n_rows)  # Cap at 1000 samples or use all if smaller
