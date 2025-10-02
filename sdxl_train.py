@@ -623,6 +623,16 @@ def train(args):
             optimizer_train_if_needed()
             current_step.value = global_step
 
+            if args.scale_lr_by_batch:
+                batch_size = batch["latents"].shape[0]
+                lr_factor = batch_size ** 0.5
+                lr_scheduler.scheduler.base_lrs[0] = args.learning_rate * lr_factor
+                if args.train_text_encoder:
+                    lr_scheduler.scheduler.base_lrs[1] = lr_te1 * lr_factor
+                    if len(lr_scheduler.scheduler.base_lrs) > 2:
+                        lr_scheduler.scheduler.base_lrs[2] = lr_te2 * lr_factor
+
+
             if args.fused_optimizer_groups:
                 optimizer_hooked_count = {i: 0 for i in range(len(optimizers))}  # reset counter for each step
 

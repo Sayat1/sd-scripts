@@ -3094,6 +3094,13 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument("--learning_rate", type=float, default=2.0e-6, help="learning rate / 学習率")
+
+    parser.add_argument(
+        "--scale_lr_by_batch",
+        action="store_true",
+        help="scale learning rate by batch size(sqrt) / バッチサイズに応じて学習率をスケーリングする",
+    )
+
     parser.add_argument(
         "--max_grad_norm",
         default=1.0,
