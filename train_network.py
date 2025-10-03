@@ -1016,6 +1016,17 @@ class NetworkTrainer:
                     initial_step -= 1
                     continue
 
+                if args.scale_lr_by_batch:
+                    batch_size = batch["latents"].shape[0]
+                    lr_factor = batch_size ** 0.5
+                    lr_scheduler.scheduler.base_lrs[0] = args.unet_lr if args.unet_lr is not None else args.learning_rate * lr_factor
+                    lr_idx=1
+                    if train_text_encoder:
+                        for tlr in text_encoder_lrs:
+                            if tlr is not None:
+                                lr_scheduler.scheduler.base_lrs[lr_idx] = tlr * lr_factor
+                                lr_idx+=1
+
                 with accelerator.accumulate(training_model):
                     on_step_start(text_encoder, unet)
 
