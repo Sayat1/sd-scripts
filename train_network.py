@@ -1022,10 +1022,13 @@ class NetworkTrainer:
                     lr_scheduler.scheduler.base_lrs[0] = args.unet_lr if args.unet_lr is not None else args.learning_rate * lr_factor
                     lr_idx=1
                     if train_text_encoder:
-                        for tlr in text_encoder_lrs:
-                            if tlr is not None:
-                                lr_scheduler.scheduler.base_lrs[lr_idx] = tlr * lr_factor
-                                lr_idx+=1
+                        if type(text_encoder_lrs) is list:
+                            for tlr in text_encoder_lrs:
+                                if tlr is not None:
+                                    lr_scheduler.scheduler.base_lrs[lr_idx] = tlr * lr_factor
+                                    lr_idx+=1
+                        else:
+                            lr_scheduler.scheduler.base_lrs[1] = text_encoder_lrs * lr_factor
 
                 with accelerator.accumulate(training_model):
                     on_step_start(text_encoder, unet)
