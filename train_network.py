@@ -422,6 +422,15 @@ class NetworkTrainer:
 
         optimizer_name, optimizer_args, optimizer = train_util.get_optimizer(args, trainable_params)
 
+        if args.scale_lr_by_batch:
+            unet_indices = []
+            te_indices = []
+            for i , desc in enumerate(lr_descriptions):
+                if "unet" in desc:
+                    unet_indices.append(i)
+                elif "text" in  desc:
+                    te_indices.append(i)
+
         # dataloaderを準備する
         # DataLoaderのプロセス数：0 は persistent_workers が使えないので注意
         n_workers = min(args.max_data_loader_n_workers, os.cpu_count())  # cpu_count or max_data_loader_n_workers
@@ -447,7 +456,7 @@ class NetworkTrainer:
         # データセット側にも学習ステップを送信
         train_dataset_group.set_max_train_steps(args.max_train_steps)
 
-        # lr scheduler 그룹마다 따로
+        # lr scheduler 그룹마다 따로 이것이 scale_lr_by_batch와 문제가 있음(unet이 반드시 idx 0이아님 나중에 수정)
         lr_scheduler = train_util.get_lr_scheduler(args, optimizer, accelerator.num_processes, train_text_encoders)
 
         # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
@@ -1000,6 +1009,7 @@ class NetworkTrainer:
                 for t_enc,t_te in zip(text_encoders,train_text_encoders,strict=True):
                     if not t_te:
                         continue
+                    t_enc.train()
                     # set top parameter requires_grad = True for gradient checkpointing works
                     accelerator.unwrap_model(t_enc).text_model.embeddings.requires_grad_(True)
                 del t_enc
@@ -1019,16 +1029,12 @@ class NetworkTrainer:
                 if args.scale_lr_by_batch:
                     batch_size = batch["latents"].shape[0]
                     lr_factor = batch_size ** 0.5
-                    lr_scheduler.scheduler.base_lrs[0] = args.unet_lr if args.unet_lr is not None else args.learning_rate * lr_factor
-                    lr_idx=1
+                    for idx in unet_indices:
+                        lr_scheduler.scheduler.base_lrs[idx] = (args.unet_lr if args.unet_lr is not None else args.learning_rate) * lr_factor
+
                     if train_text_encoder:
-                        if type(text_encoder_lrs) is list:
-                            for tlr in text_encoder_lrs:
-                                if tlr is not None:
-                                    lr_scheduler.scheduler.base_lrs[lr_idx] = tlr * lr_factor
-                                    lr_idx+=1
-                        else:
-                            lr_scheduler.scheduler.base_lrs[1] = text_encoder_lrs * lr_factor
+                        for idx in te_indices:
+                            lr_scheduler.scheduler.base_lrs[idx] = text_encoder_lrs * lr_factor
 
                 with accelerator.accumulate(training_model):
                     on_step_start(text_encoder, unet)
@@ -1097,23 +1103,6 @@ class NetworkTrainer:
                             inp_noisy_latents = noise_scheduler.precondition_inputs(noisy_latents, sigmas)
                         else:
                             inp_noisy_latents = noisy_latents / ((sigmas**2 + 1) ** 0.5)
-
-                    #필요하진 않지만 확실하게
-                    noisy_latents.requires_grad_(train_unet)
-                    for t in text_encoder_conds:
-                        t.requires_grad_(train_text_encoder)
-                    if edm_training:
-                        inp_noisy_latents.requires_grad_(train_unet)
-
-                    # ensure the hidden state will require grad
-                    if args.gradient_checkpointing:
-                        for x in noisy_latents:
-                            x.requires_grad_(train_unet) #무조건 True 대신 아마?        
-                        for t in text_encoder_conds:
-                            t.requires_grad_(train_text_encoder) #무조건 True 대신 아마?
-                        if edm_training:
-                            for x in inp_noisy_latents:
-                                x.requires_grad_(train_unet) #무조건 True 대신 아마?
 
                     # Predict the noise residual
                     with accelerator.autocast():
