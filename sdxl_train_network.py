@@ -115,8 +115,9 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
                 dataset.new_cache_text_encoder_outputs(text_encoders + [accelerator.unwrap_model(text_encoders[-1])], accelerator)
             accelerator.wait_for_everyone()
 
-            text_encoders[0].to("cpu", dtype=torch.float32)  # Text Encoder doesn't work with fp16 on CPU
-            text_encoders[1].to("cpu", dtype=torch.float32)
+            if not args.lowram:
+                text_encoders[0].to("cpu", dtype=torch.float32)  # Text Encoder doesn't work with fp16 on CPU
+                text_encoders[1].to("cpu", dtype=torch.float32)
             clean_memory_on_device(accelerator.device)
 
             if not args.lowram:

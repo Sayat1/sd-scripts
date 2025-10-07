@@ -925,9 +925,6 @@ class NetworkTrainer:
             del vae
             vae = None
 
-        if args.lowram:
-            for t_enc in text_encoders:
-                t_enc.to(accelerator.device)
         clean_memory_on_device(accelerator.device)
 
         # 実験的機能：勾配も含めたfp16学習を行う　PyTorchにパッチを当ててfp16でのgrad scaleを有効にする
