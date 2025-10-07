@@ -175,6 +175,9 @@ class NetworkTrainer:
     def load_unet_lazily(self, args, weight_dtype, accelerator, text_encoders) -> tuple[nn.Module, List[nn.Module]]:
         raise NotImplementedError()
 
+    def load_vae_only(self, args, weight_dtype, accelerator):
+        return None
+
     def get_tokenize_strategy(self, args):
         return strategy_sd.SdTokenizeStrategy(args.v2, args.max_token_length, args.tokenizer_cache_dir)
 
@@ -584,17 +587,16 @@ class NetworkTrainer:
         weight_dtype, save_dtype = train_util.prepare_dtype(args)
         vae_dtype = (torch.float32 if args.no_half_vae else weight_dtype) if self.cast_vae(args) else None
 
-        # load target models: unet may be None for lazy loading
-        model_version, text_encoder, vae, unet = self.load_target_model(args, weight_dtype, accelerator)
-        if vae_dtype is None:
-            vae_dtype = vae.dtype
-            logger.info(f"vae_dtype is set to {vae_dtype} by the model since cast_vae() is false")
-
-        # text_encoder is List[CLIPTextModel] or CLIPTextModel
-        text_encoders = text_encoder if isinstance(text_encoder, list) else [text_encoder]
+        model_version = "unknown"
 
         # prepare dataset for latents caching if needed
         if cache_latents:
+            vae = self.load_vae_only(args, vae_dtype, accelerator)
+            if vae is None:
+                model_version, text_encoder, vae, unet = self.load_target_model(args, weight_dtype, accelerator)
+                if vae_dtype is None:
+                    vae_dtype = vae.dtype
+                    logger.info(f"vae_dtype is set to {vae_dtype} by the model since cast_vae() is false")
             vae.to(accelerator.device, dtype=vae_dtype)
             vae.requires_grad_(False)
             vae.eval()
@@ -603,10 +605,21 @@ class NetworkTrainer:
             if val_dataset_group is not None:
                 val_dataset_group.new_cache_latents(vae, accelerator)
 
-            vae.to("cpu")
+            if model_version == "unknown":
+                del vae
             clean_memory_on_device(accelerator.device)
 
             accelerator.wait_for_everyone()
+
+        if model_version == "unknown":
+            # load target models: unet may be None for lazy loading
+            model_version, text_encoder, vae, unet = self.load_target_model(args, weight_dtype, accelerator)
+            if vae_dtype is None:
+                vae_dtype = vae.dtype
+                logger.info(f"vae_dtype is set to {vae_dtype} by the model since cast_vae() is false")
+
+        # text_encoder is List[CLIPTextModel] or CLIPTextModel
+        text_encoders = text_encoder if isinstance(text_encoder, list) else [text_encoder]
 
         # 必要ならテキストエンコーダーの出力をキャッシュする: Text Encoderはcpuまたはgpuへ移される
         # cache text encoder outputs if needed: Text Encoder is moved to cpu or gpu

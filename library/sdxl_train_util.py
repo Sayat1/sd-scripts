@@ -24,6 +24,30 @@ TOKENIZER2_PATH = "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k"
 
 # DEFAULT_NOISE_OFFSET = 0.0357
 
+def load_vae_only(args, accelerator, weight_dtype):
+    name_or_path = args.pretrained_model_name_or_path
+    name_or_path = os.readlink(name_or_path) if os.path.islink(name_or_path) else name_or_path
+    vae_path = args.vae
+    load_stable_diffusion_format = os.path.isfile(name_or_path)  # determine SD or Diffusers
+
+    if vae_path is not None:
+        vae = model_util.load_vae(vae_path, weight_dtype)
+        logger.info("additional VAE loaded")
+        return vae
+    
+    if load_stable_diffusion_format:
+        vae = sdxl_model_util.load_vae_from_sdxl_checkpoint(name_or_path, accelerator.device if args.lowram else "cpu", weight_dtype)
+    else:
+        from diffusers import AutoencoderKL
+        vae = AutoencoderKL.from_pretrained(
+            name_or_path,
+            subfolder="vae" if vae_path is None else None,
+            revision=None,
+            variant=None,
+        )
+
+    return vae
+
 
 def load_target_model(args, accelerator, model_version: str, weight_dtype):
     model_dtype = match_mixed_precision(args, weight_dtype)  # prepare fp16/bf16

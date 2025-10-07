@@ -44,6 +44,9 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
         if val_dataset_group is not None:
             val_dataset_group.verify_bucket_reso_steps(32)
 
+    def load_vae_only(self, args, weight_dtype, accelerator):
+        return sdxl_train_util.load_vae_only(args, accelerator, weight_dtype)
+
     def load_target_model(self, args, weight_dtype, accelerator):
         (
             load_stable_diffusion_format,
