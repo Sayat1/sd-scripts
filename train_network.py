@@ -1513,10 +1513,7 @@ class NetworkTrainer:
                 loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
                 avr_loss: float = loss_recorder.moving_average
                 logs = {"avr_loss": avr_loss}  # , "lr": lr_scheduler.get_last_lr()[0]}
-                progress_bar.set_postfix(**{**max_mean_logs, **logs})
-
-                if is_tracking:
-                    logs = self.generate_step_logs(
+                logs = self.generate_step_logs(
                         args,
                         current_loss,
                         avr_loss,
@@ -1529,6 +1526,9 @@ class NetworkTrainer:
                         mean_grad_norm,
                         mean_combined_norm,
                     )
+                progress_bar.set_postfix(**{**max_mean_logs, **logs})
+
+                if is_tracking:
                     self.step_logging(accelerator, logs, global_step, epoch + 1)
 
                 # VALIDATION PER STEP: global_step is already incremented
