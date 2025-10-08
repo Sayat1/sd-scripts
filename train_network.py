@@ -109,7 +109,11 @@ class NetworkTrainer:
             if (
                 args.optimizer_type.lower().endswith("ProdigyPlusScheduleFree".lower()) and optimizer is not None
             ):  # tracking d*lr value of unet.
-                logs["lr/d*lr"] = optimizer.param_groups[0]["d"] * optimizer.param_groups[0]["lr"]
+                if "effective_lr" in lr_scheduler.optimizers[-1].param_groups[i]:
+                    logs[f"lr/d*effective_lr/{lr_desc}"] = (
+                        optimizer.param_groups[i]["d"] * optimizer.param_groups[i]["effective_lr"]
+                    )
+                logs["lr/d*lr"] = optimizer.param_groups[i]["d"] * optimizer.param_groups[i]["lr"]
                 
         return logs
 
