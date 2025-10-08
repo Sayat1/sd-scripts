@@ -113,7 +113,7 @@ class NetworkTrainer:
                     logs[f"lr/d*effective_lr/{lr_desc}"] = (
                         optimizer.param_groups[i]["d"] * optimizer.param_groups[i]["effective_lr"]
                     )
-                logs["lr/d*lr"] = optimizer.param_groups[i]["d"] * optimizer.param_groups[i]["lr"]
+                logs[f"lr/d*lr/{lr_desc}"] = optimizer.param_groups[i]["d"] * optimizer.param_groups[i]["lr"]
                 
         return logs
 
