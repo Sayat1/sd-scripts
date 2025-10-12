@@ -5319,10 +5319,6 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
     """
     Unified API to get any scheduler from its name.
     """
-    # if schedulefree optimizer, return dummy scheduler
-    if is_schedulefree_optimizer(optimizer, args):
-        return get_dummy_scheduler(optimizer)
-
     name = args.lr_scheduler
     num_training_steps = args.max_train_steps * num_processes  # * args.gradient_accumulation_steps
     num_warmup_steps: Optional[int] = (
@@ -5341,6 +5337,10 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
         args.text_encoder_start_step = (
             int(args.text_encoder_start_step * num_training_steps) if isinstance(args.text_encoder_start_step, float) else args.text_encoder_start_step
             )
+
+    # if schedulefree optimizer, return dummy scheduler after some args are set
+    if is_schedulefree_optimizer(optimizer, args):
+        return get_dummy_scheduler(optimizer)
 
     lr_scheduler_kwargs = {}  # get custom lr_scheduler kwargs
     if args.lr_scheduler_args is not None and len(args.lr_scheduler_args) > 0:

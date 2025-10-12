@@ -832,8 +832,12 @@ class NetworkTrainer:
             te_step_train_flag = False
             original_text_encoder_lr = text_encoder_lr
             text_encoder_lr = 0.0
+            scheduler_name = lr_scheduler.__class__.__name__
             for idx in te_indices:
-                lr_scheduler.base_lrs[idx] = text_encoder_lr
+                if scheduler_name == "DummyScheduler":
+                    optimizer.param_groups[idx]["lr"] = text_encoder_lr
+                else:
+                    lr_scheduler.base_lrs[idx] = text_encoder_lr
             accelerator.print(f"set text encoder lr to 0.0 until step {args.text_encoder_start_step}")
 
         # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
@@ -1454,19 +1458,30 @@ class NetworkTrainer:
                     if global_step >= args.text_encoder_start_step:
                         te_step_train_flag = True
                         text_encoder_lr = original_text_encoder_lr
+                        scheduler_name = lr_scheduler.__class__.__name__
                         for idx in te_indices:
-                            lr_scheduler.scheduler.base_lrs[idx] = text_encoder_lr
+                            if scheduler_name == "DummyScheduler":
+                                optimizer.param_groups[idx]["lr"] = text_encoder_lr
+                            else:
+                                lr_scheduler.scheduler.base_lrs[idx] = text_encoder_lr
                         accelerator.print(f"start training text encoder at step {global_step}. set lr to {text_encoder_lr}")
 
                 if args.scale_lr_by_batch:
                     batch_size = batch["latents"].shape[0]
                     lr_factor = batch_size ** 0.5
+                    scheduler_name = lr_scheduler.__class__.__name__
                     for idx in unet_indices:
-                        lr_scheduler.scheduler.base_lrs[idx] = (args.unet_lr if args.unet_lr is not None else args.learning_rate) * lr_factor
+                        if scheduler_name == "DummyScheduler":
+                            optimizer.param_groups[idx]["lr"] = (args.unet_lr if args.unet_lr is not None else args.learning_rate) * lr_factor
+                        else:
+                            lr_scheduler.scheduler.base_lrs[idx] = (args.unet_lr if args.unet_lr is not None else args.learning_rate) * lr_factor
 
                     if train_text_encoder:
                         for idx in te_indices:
-                            lr_scheduler.scheduler.base_lrs[idx] = text_encoder_lr * lr_factor
+                            if scheduler_name == "DummyScheduler":
+                                optimizer.param_groups[idx]["lr"] = text_encoder_lr * lr_factor
+                            else:
+                                lr_scheduler.scheduler.base_lrs[idx] = text_encoder_lr * lr_factor
 
                 with accelerator.accumulate(training_model):
                     on_step_start_for_network(text_encoder, unet)
