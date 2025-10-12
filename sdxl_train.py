@@ -454,6 +454,29 @@ def train(args):
     else:
         lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
 
+    if (train_text_encoder1 or train_text_encoder2) and args.text_encoder_start_step > 0:
+            #TODO sayat. 둘중 하나만 배울경우도 생각해서 유연하게
+            te_step_train_flag = False
+            original_lr_te1 = lr_te1
+            original_lr_te2 = lr_te2
+            lr_te1 = 0.0
+            lr_te2 = 0.0
+            scheduler_name = lr_scheduler.__class__.__name__
+
+            #순서가 달라질수도있으므로.. 디버깅용
+            print(len(optimizer.param_groups[0]["params"]))
+            print(len(optimizer.param_groups[1]["params"]))
+            print(len(optimizer.param_groups[2]["params"]))
+
+            if scheduler_name == "DummyScheduler":
+                optimizer.param_groups[1]["lr"] = lr_te1
+                optimizer.param_groups[2]["lr"] = lr_te2
+            else:
+                print(lr_scheduler.base_lrs)
+                lr_scheduler.base_lrs[1] = lr_te1
+                lr_scheduler.base_lrs[2] = lr_te2
+            accelerator.print(f"set text encoder lr to 0.0 until step {args.text_encoder_start_step}")
+
     # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
     if args.full_fp16:
         assert (
@@ -635,6 +658,27 @@ def train(args):
 
             if args.fused_optimizer_groups:
                 optimizer_hooked_count = {i: 0 for i in range(len(optimizers))}  # reset counter for each step
+
+            if (train_text_encoder1 or train_text_encoder2) and args.text_encoder_start_step > 0 and te_step_train_flag==False:
+                if global_step >= args.text_encoder_start_step:
+                    te_step_train_flag = True
+                    lr_te1 = original_lr_te1
+                    lr_te2 = original_lr_te2
+                    
+                    #순서가 달라질수도있으므로.. 디버깅용
+                    print(len(optimizer.param_groups[0]["params"]))
+                    print(len(optimizer.param_groups[1]["params"]))
+                    print(len(optimizer.param_groups[2]["params"]))
+
+                    scheduler_name = lr_scheduler.__class__.__name__
+                    if scheduler_name == "DummyScheduler":
+                        optimizer.param_groups[1]["lr"] = lr_te1
+                        optimizer.param_groups[2]["lr"] = lr_te2
+                    else:
+                        print(lr_scheduler.scheduler.base_lrs)
+                        lr_scheduler.scheduler.base_lrs[1] = lr_te1
+                        lr_scheduler.scheduler.base_lrs[2] = lr_te2
+                    accelerator.print(f"start training text encoder at step {global_step}. set lr to {text_encoder_lr}")
 
             with accelerator.accumulate(*training_models):
                 if "latents" in batch and batch["latents"] is not None:
