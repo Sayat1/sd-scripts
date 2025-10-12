@@ -3737,6 +3737,13 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument("--learning_rate", type=float, default=2.0e-6, help="learning rate / 学習率")
+
+    parser.add_argument(
+        "--scale_lr_by_batch",
+        action="store_true",
+        help="scale learning rate by batch size(sqrt) / バッチサイズに応じて学習率をスケーリングする",
+    )
+
     parser.add_argument(
         "--max_grad_norm",
         default=1.0,
@@ -3765,6 +3772,14 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
     #     nargs="*",
     #     help='additional arguments for schedulefree_wrapper (like "momentum=0.9 weight_decay_at_y=0.1 ...") / オプティマイザの追加引数（例： "momentum=0.9 weight_decay_at_y=0.1 ..."）',
     # )
+
+    parser.add_argument(
+        "--text_encoder_start_step",
+        type=int_or_float,
+        default=0,
+        help="Int number of steps for the turning on the TE (default is 0) or float with ratio of train steps"
+        " / 学習率のスケジューラをウォームアップするステップ数（デフォルト0）、または学習ステップの比率（1未満のfloat値の場合）",
+    )
 
     parser.add_argument("--lr_scheduler_type", type=str, default="", help="custom scheduler module / 使用するスケジューラ")
     parser.add_argument(
@@ -5321,6 +5336,11 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
     power = args.lr_scheduler_power
     timescale = args.lr_scheduler_timescale
     min_lr_ratio = args.lr_scheduler_min_lr_ratio
+
+    if args.text_encoder_start_step > 0:
+        args.text_encoder_start_step = (
+            int(args.text_encoder_start_step * num_training_steps) if isinstance(args.text_encoder_start_step, float) else args.text_encoder_start_step
+            )
 
     lr_scheduler_kwargs = {}  # get custom lr_scheduler kwargs
     if args.lr_scheduler_args is not None and len(args.lr_scheduler_args) > 0:
