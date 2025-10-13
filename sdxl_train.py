@@ -678,7 +678,7 @@ def train(args):
                         print(lr_scheduler.scheduler.base_lrs)
                         lr_scheduler.scheduler.base_lrs[1] = lr_te1
                         lr_scheduler.scheduler.base_lrs[2] = lr_te2
-                    accelerator.print(f"start training text encoder at step {global_step}. set lr to {text_encoder_lr}")
+                    accelerator.print(f"start training text encoder at step {global_step}. set lr to {lr_te1} / {lr_te2}")
 
             with accelerator.accumulate(*training_models):
                 if "latents" in batch and batch["latents"] is not None:
