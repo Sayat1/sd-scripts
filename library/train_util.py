@@ -3020,7 +3020,8 @@ def trim_and_resize_if_required(
         image = image[:, p : p + reso[0]]
     if image_height > reso[1]:
         trim_size = image_height - reso[1]
-        p = trim_size // 2 if not random_crop else random.randint(0, trim_size)
+        #p = trim_size // 2 if not random_crop else random.randint(0, trim_size)
+        p = 0 if not random_crop else random.randint(0, trim_size)
         # logger.info(f"h {trim_size} {p})
         image = image[p : p + reso[1]]
 
