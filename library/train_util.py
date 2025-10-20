@@ -74,7 +74,7 @@ import library.model_util as model_util
 import library.huggingface_util as huggingface_util
 import library.sai_model_spec as sai_model_spec
 import library.deepspeed_utils as deepspeed_utils
-from library.utils import setup_logging, resize_image, validate_interpolation_fn
+from library.utils import setup_logging, resize_image, validate_interpolation_fn, colab_delete_file
 
 setup_logging()
 import logging
@@ -831,7 +831,10 @@ class BaseDataset(torch.utils.data.Dataset):
         )
 
         if is_drop_out:
-            caption = ""
+            if hasattr(subset, 'class_tokens'):
+                caption = subset.class_tokens
+            else:
+                caption = ""
         else:
             # process wildcards
             if subset.enable_wildcard:
@@ -6000,8 +6003,10 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
     logger.info("")
     logger.info(f"saving state at epoch {epoch_no}")
     os.makedirs(args.output_dir, exist_ok=True)
+    state_root = os.path.join(args.output_dir , args.output_name, "backups")
+    os.makedirs(state_root, exist_ok=True)
 
-    state_dir = os.path.join(args.output_dir, EPOCH_STATE_NAME.format(model_name, epoch_no))
+    state_dir = os.path.join(state_root, EPOCH_STATE_NAME.format(model_name, epoch_no))
     accelerator.save_state(state_dir)
     if args.save_state_to_huggingface:
         logger.info("uploading state to huggingface.")
@@ -6009,11 +6014,16 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
 
     last_n_epochs = args.save_last_n_epochs_state if args.save_last_n_epochs_state else args.save_last_n_epochs
     if last_n_epochs is not None:
+        from pathlib import Path
         remove_epoch_no = epoch_no - args.save_every_n_epochs * last_n_epochs
         state_dir_old = os.path.join(args.output_dir, EPOCH_STATE_NAME.format(model_name, remove_epoch_no))
         if os.path.exists(state_dir_old):
             logger.info(f"removing old state: {state_dir_old}")
-            shutil.rmtree(state_dir_old)
+            sub_files = Path(state_dir_old).rglob("*.*")
+            for sub_file in sub_files:
+                if not sub_file.is_dir():
+                    colab_delete_file(sub_file)
+            #shutil.rmtree(state_dir_old)
 
 
 def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_no):
@@ -6022,8 +6032,10 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
     logger.info("")
     logger.info(f"saving state at step {step_no}")
     os.makedirs(args.output_dir, exist_ok=True)
+    state_root = os.path.join(args.output_dir , args.output_name, "backups")
+    os.makedirs(state_root, exist_ok=True)
 
-    state_dir = os.path.join(args.output_dir, STEP_STATE_NAME.format(model_name, step_no))
+    state_dir = os.path.join(state_root, STEP_STATE_NAME.format(model_name, step_no))
     accelerator.save_state(state_dir)
     if args.save_state_to_huggingface:
         logger.info("uploading state to huggingface.")
@@ -6031,15 +6043,20 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
 
     last_n_steps = args.save_last_n_steps_state if args.save_last_n_steps_state else args.save_last_n_steps
     if last_n_steps is not None:
+        from pathlib import Path
         # last_n_steps前のstep_noから、save_every_n_stepsの倍数のstep_noを計算して削除する
         remove_step_no = step_no - last_n_steps - 1
         remove_step_no = remove_step_no - (remove_step_no % args.save_every_n_steps)
 
         if remove_step_no > 0:
-            state_dir_old = os.path.join(args.output_dir, STEP_STATE_NAME.format(model_name, remove_step_no))
+            state_dir_old = os.path.join(state_root, STEP_STATE_NAME.format(model_name, remove_step_no))
             if os.path.exists(state_dir_old):
                 logger.info(f"removing old state: {state_dir_old}")
-                shutil.rmtree(state_dir_old)
+                sub_files = Path(state_dir_old).rglob("*.*")
+                for sub_file in sub_files:
+                    if not sub_file.is_dir():
+                        colab_delete_file(sub_file)
+                #shutil.rmtree(state_dir_old)
 
 
 def save_state_on_train_end(args: argparse.Namespace, accelerator):
@@ -6048,8 +6065,10 @@ def save_state_on_train_end(args: argparse.Namespace, accelerator):
     logger.info("")
     logger.info("saving last state.")
     os.makedirs(args.output_dir, exist_ok=True)
+    state_root = os.path.join(args.output_dir , args.output_name, "backups")
+    os.makedirs(state_root, exist_ok=True)
 
-    state_dir = os.path.join(args.output_dir, LAST_STATE_NAME.format(model_name))
+    state_dir = os.path.join(state_root, LAST_STATE_NAME.format(model_name))
     accelerator.save_state(state_dir)
 
     if args.save_state_to_huggingface:
