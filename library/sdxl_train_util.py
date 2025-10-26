@@ -157,8 +157,9 @@ def _load_target_model(
         state_dict = sdxl_model_util.convert_diffusers_unet_state_dict_to_sdxl(unet.state_dict())
         with init_empty_weights():
             unet = sdxl_original_unet.SdxlUNet2DConditionModel()  # overwrite unet
-        sdxl_model_util._load_state_dict_on_device(unet, state_dict, device=device, dtype=model_dtype)
+        sdxl_model_util._load_state_dict_on_device(unet, state_dict, device=device, dtype=weight_dtype)
         logger.info("U-Net converted to original U-Net")
+        del state_dict
 
         logit_scale = None
         ckpt_info = None
