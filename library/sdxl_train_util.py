@@ -126,10 +126,10 @@ def _load_target_model(
         from diffusers import AutoencoderKL,UNet2DConditionModel
 
         text_encoder1 = import_model_class_from_model_name_or_path(name_or_path,revision=None).from_pretrained(
-            name_or_path, subfolder="text_encoder", revision=None, variant=None
+            name_or_path, subfolder="text_encoder", revision=None, variant=None,  device_map="auto",
         )
         text_encoder2 = import_model_class_from_model_name_or_path(name_or_path,revision=None,subfolder="text_encoder_2").from_pretrained(
-            name_or_path, subfolder="text_encoder_2", revision=None, variant=None
+            name_or_path, subfolder="text_encoder_2", revision=None, variant=None,  device_map="auto",
         )
 
         vae_load_path = (
@@ -144,7 +144,7 @@ def _load_target_model(
             variant=None,
         )
         unet = UNet2DConditionModel.from_pretrained(
-            name_or_path, subfolder="unet", revision=None, variant=None, torch_dtype=weight_dtype,
+            name_or_path, subfolder="unet", revision=None, variant=None, torch_dtype=weight_dtype, device_map="auto",
         )
 
         # convert to fp32 for cache text_encoders outputs
