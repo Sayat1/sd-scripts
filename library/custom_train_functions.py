@@ -484,7 +484,7 @@ def apply_noise_offset(latents, noise, noise_offset, adaptive_noise_scale) -> to
     return noise
 
 
-def apply_masked_loss(loss, batch, face_weight=1.0, body_weight=1.0, nonmask_weight=0.0) -> torch.FloatTensor:
+def apply_masked_loss(loss, batch, min_mask=0.0) -> torch.FloatTensor:
     if "conditioning_images" in batch:
         # conditioning image is -1 to 1. we need to convert it to 0 to 1
         mask_image = batch["conditioning_images"].to(dtype=loss.dtype)[:, 0].unsqueeze(1)  # use R channel
@@ -499,14 +499,9 @@ def apply_masked_loss(loss, batch, face_weight=1.0, body_weight=1.0, nonmask_wei
 
     # resize to the same size as the loss
     mask_image = torch.nn.functional.interpolate(mask_image, size=loss.shape[2:], mode="area")
-    non_mask = (mask_image < 0.2).float() * nonmask_weight
 
-    body_mask = (mask_image >= 0.2).float() * body_weight
-
-    face_mask = (mask_image >= 0.8).float() * face_weight
-
-    merged_mask_image = torch.maximum(body_mask, torch.maximum(face_mask, non_mask))
-    loss = loss * merged_mask_image
+    mask_image = torch.clamp(mask_image, min=min_mask)
+    loss = loss * mask_image
     return loss
 
 
