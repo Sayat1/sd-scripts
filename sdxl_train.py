@@ -765,7 +765,7 @@ def train(args):
                     # do not mean over batch dimension for snr weight or scale v-pred loss
                     loss = train_util.conditional_loss(noise_pred.float(), target.float(), args.loss_type, "none", huber_c)
                     if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
-                        loss = apply_masked_loss(loss, batch)
+                        loss = apply_masked_loss(loss, batch, min_mask=args.minimum_masked_loss_weight)
                     loss = loss.mean([1, 2, 3])
 
                     if args.min_snr_gamma:
