@@ -120,7 +120,7 @@ def _load_target_model(
             unet,
             logit_scale,
             ckpt_info,
-        ) = sdxl_model_util.load_models_from_sdxl_checkpoint(model_version, name_or_path, device, model_dtype, disable_mmap)
+        ) = sdxl_model_util.load_models_from_sdxl_checkpoint(model_version, name_or_path, device, weight_dtype, disable_mmap)
     else:
         # Diffusers model is loaded to CPU
         from diffusers import AutoencoderKL,UNet2DConditionModel

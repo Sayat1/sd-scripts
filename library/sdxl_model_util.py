@@ -328,6 +328,11 @@ def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dty
     info = _load_state_dict_on_device(vae, converted_vae_checkpoint, device=map_location, dtype=dtype)
     logger.info(f"VAE: {info}")
 
+    del unet_sd
+    del state_dict
+    del te1_sd
+    del te2_sd
+
     ckpt_info = (epoch, global_step) if epoch is not None else None
     return text_model1, text_model2, vae, unet, logit_scale, ckpt_info
 
