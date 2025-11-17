@@ -126,10 +126,10 @@ def _load_target_model(
         from diffusers import AutoencoderKL,UNet2DConditionModel
 
         text_encoder1 = import_model_class_from_model_name_or_path(name_or_path,revision=None).from_pretrained(
-            name_or_path, subfolder="text_encoder", revision=None, variant=None,  device_map="auto",
+            name_or_path, subfolder="text_encoder", revision=None, variant=None, torch_dtype=torch.float32, device_map="auto",
         )
         text_encoder2 = import_model_class_from_model_name_or_path(name_or_path,revision=None,subfolder="text_encoder_2").from_pretrained(
-            name_or_path, subfolder="text_encoder_2", revision=None, variant=None,  device_map="auto",
+            name_or_path, subfolder="text_encoder_2", revision=None, variant=None, torch_dtype=torch.float32, device_map="auto",
         )
 
         vae_load_path = (

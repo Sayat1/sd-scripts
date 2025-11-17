@@ -855,7 +855,8 @@ class NetworkTrainer:
             accelerator.print("enable full bf16 training.")
             network.to(weight_dtype)
 
-        unet_weight_dtype = te_weight_dtype = weight_dtype
+        unet_weight_dtype = weight_dtype
+        te_weight_dtype = torch.float32
         # Experimental Feature: Put base model into fp8 to save vram
         if args.fp8_base or args.fp8_base_unet:
             assert torch.__version__ >= "2.1.0", "fp8_base requires torch>=2.1.0 / fp8を使う場合はtorch>=2.1.0が必要です。"

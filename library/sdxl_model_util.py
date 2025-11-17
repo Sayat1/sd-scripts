@@ -310,11 +310,11 @@ def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dty
     if "text_model.embeddings.position_ids" in te1_sd:
         te1_sd.pop("text_model.embeddings.position_ids")
 
-    info1 = _load_state_dict_on_device(text_model1, te1_sd, device=map_location)  # remain fp32
+    info1 = _load_state_dict_on_device(text_model1, te1_sd, device=map_location, dtype=torch.float32)  # remain fp32
     logger.info(f"text encoder 1: {info1}")
 
     converted_sd, logit_scale = convert_sdxl_text_encoder_2_checkpoint(te2_sd, max_length=77)
-    info2 = _load_state_dict_on_device(text_model2, converted_sd, device=map_location)  # remain fp32
+    info2 = _load_state_dict_on_device(text_model2, converted_sd, device=map_location, dtype=torch.float32)  # remain fp32
     logger.info(f"text encoder 2: {info2}")
 
     # prepare vae
