@@ -5970,7 +5970,7 @@ def save_sd_model_on_epoch_end_or_stepwise_common(
             remove_ckpt_file = os.path.join(args.output_dir, remove_ckpt_name)
             if os.path.exists(remove_ckpt_file):
                 logger.info(f"removing old checkpoint: {remove_ckpt_file}")
-                os.remove(remove_ckpt_file)
+                colab_delete_file(remove_ckpt_file)
 
     else:
         if on_epoch_end:

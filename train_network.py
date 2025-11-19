@@ -45,7 +45,7 @@ from library.custom_train_functions import (
     apply_debiased_estimation,
     apply_masked_loss,
 )
-from library.utils import setup_logging, add_logging_arguments
+from library.utils import setup_logging, add_logging_arguments, colab_delete_file
 
 setup_logging()
 import logging
@@ -1573,7 +1573,7 @@ class NetworkTrainer:
                             remove_step_no = train_util.get_remove_step_no(args, global_step)
                             if remove_step_no is not None:
                                 remove_ckpt_name = train_util.get_step_ckpt_name(args, "." + args.save_model_as, remove_step_no)
-                                remove_model(remove_ckpt_name)
+                                colab_delete_file(remove_ckpt_name)
                     optimizer_train_fn()
 
                 current_loss = loss.detach().item()
@@ -1766,7 +1766,7 @@ class NetworkTrainer:
                     remove_epoch_no = train_util.get_remove_epoch_no(args, epoch + 1)
                     if remove_epoch_no is not None:
                         remove_ckpt_name = train_util.get_epoch_ckpt_name(args, "." + args.save_model_as, remove_epoch_no)
-                        remove_model(remove_ckpt_name)
+                        colab_delete_file(remove_ckpt_name)
 
                     if args.save_state:
                         train_util.save_and_remove_state_on_epoch_end(args, accelerator, epoch + 1)
