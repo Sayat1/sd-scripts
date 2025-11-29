@@ -1376,10 +1376,10 @@ class NetworkTrainer:
 
         # training loop
         if initial_step > 0:  # only if skip_until_initial_step is specified
+            global_step = initial_step
             for skip_epoch in range(epoch_to_start):  # skip epochs
                 logger.info(f"skipping epoch {skip_epoch+1} because initial_step (multiplied) is {initial_step}")
                 initial_step -= len(train_dataloader)
-            global_step = initial_step
 
         # log device and dtype for each model
         logger.info(f"unet dtype: {unet_weight_dtype}, device: {unet.device}")
@@ -1393,7 +1393,7 @@ class NetworkTrainer:
         clean_memory_on_device(accelerator.device)
 
         progress_bar = tqdm(
-            range(args.max_train_steps - initial_step), smoothing=0, disable=not accelerator.is_local_main_process, desc="steps"
+            range(args.max_train_steps), initial=global_step, smoothing=0, disable=not accelerator.is_local_main_process, desc="steps"
         )
 
         validation_steps = (
