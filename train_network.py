@@ -12,7 +12,7 @@ import json
 from multiprocessing import Value
 import numpy as np
 
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 import torch
 import torch.nn as nn
@@ -269,11 +269,12 @@ class NetworkTrainer:
         noise, noisy_latents, timesteps = train_util.get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents)
 
         # ensure the hidden state will require grad
-        if args.gradient_checkpointing:
-            for x in noisy_latents:
-                x.requires_grad_(True)
-            for t in text_encoder_conds:
-                t.requires_grad_(True)
+        #꺼도 작동하고, 키면 느려짐 (20%정도)
+        # if args.gradient_checkpointing:
+        #     for x in noisy_latents:
+        #         x.requires_grad_(True)
+        #     for t in text_encoder_conds:
+        #         t.requires_grad_(True)
 
         # Predict the noise residual
         with torch.set_grad_enabled(is_train), accelerator.autocast():
@@ -342,6 +343,7 @@ class NetworkTrainer:
 
     def prepare_text_encoder_grad_ckpt_workaround(self, index, text_encoder):
         # set top parameter requires_grad = True for gradient checkpointing works
+        #꺼봤는데, 끄면 TE작동안함 (grad없음)
         text_encoder.text_model.embeddings.requires_grad_(True)
 
     def prepare_text_encoder_fp8(self, index, text_encoder, te_weight_dtype, weight_dtype):
@@ -670,6 +672,7 @@ class NetworkTrainer:
             for net_arg in args.network_args:
                 key, value = net_arg.split("=", 1)
                 net_kwargs[key] = value
+        print(net_kwargs)
 
         # if a new network is added in future, add if ~ then blocks for each network (;'∀')
         if args.dim_from_weights:
