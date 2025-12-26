@@ -1401,9 +1401,9 @@ class NetworkTrainer:
         #모달일경우 빈도수 줄이기
         is_modal = os.environ.get("MODAL_ENV") == "1"
         if is_modal:
-            progress_bar.dynamic_miniters = True
-            progress_bar.file=sys.stdout
-            progress_bar.smoothing=0.05
+            #progress_bar.dynamic_miniters = True
+            progress_bar.file=sys.stderr
+            #progress_bar.smoothing=0.05
 
         validation_steps = (
             min(args.max_validation_steps, len(val_dataloader)) if args.max_validation_steps is not None else len(val_dataloader)
