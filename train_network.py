@@ -273,16 +273,15 @@ class NetworkTrainer:
         # if args.gradient_checkpointing:
         #     for x in noisy_latents:
         #         x.requires_grad_(True)
-        #     for t in text_encoder_conds:
-        #         t.requires_grad_(True)
-
+        # for t in text_encoder_conds:
+        #     t.requires_grad_(True)
         # Predict the noise residual
         with torch.set_grad_enabled(is_train), accelerator.autocast():
             noise_pred = self.call_unet(
                 args,
                 accelerator,
                 unet,
-                noisy_latents.requires_grad_(train_unet),
+                noisy_latents,
                 timesteps,
                 text_encoder_conds,
                 batch,
