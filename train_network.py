@@ -1779,18 +1779,20 @@ class NetworkTrainer:
 
             # end of epoch
 
+        print("End Of Epoch loop")
         # metadata["ss_epoch"] = str(num_train_epochs)
         metadata["ss_training_finished_at"] = str(time.time())
 
         if is_main_process:
             network = accelerator.unwrap_model(network)
 
+        print("End Of Epoch loop2")
         accelerator.end_training()
         optimizer_eval_fn()
 
         if is_main_process and (args.save_state or args.save_state_on_train_end):
             train_util.save_state_on_train_end(args, accelerator)
-
+        print("End Of Epoch loop3")
         if is_main_process:
             ckpt_name = train_util.get_last_ckpt_name(args, "." + args.save_model_as)
             save_model(ckpt_name, network, global_step, num_train_epochs, force_sync_upload=True)

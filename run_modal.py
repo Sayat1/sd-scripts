@@ -23,6 +23,7 @@ image = (
             "pkg-config"
         )
         .run_commands(
+            "echo rebuild-1",
             "pip install --upgrade pip",
             "cd /root && git clone -b 'sd3' https://github.com/Sayat1/sd-scripts",
             "pip install -r /root/sd-scripts/requirements.txt",
@@ -88,13 +89,11 @@ def remote_main(args):
     os.chdir("/root/sd-scripts")
 
     import sdxl_train_network
-
     sys.argv = args
     sdxl_train_network.main()
 
     # cmd_args = [
-    #         "accelerate",
-    #         "launch"
+    #         "python"
     # ] + args
     # _exec_subprocess(
     #     cmd_args
