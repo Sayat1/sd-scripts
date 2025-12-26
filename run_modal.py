@@ -86,13 +86,19 @@ def remote_main(args):
         
     print("launching dreambooth training script")
     os.chdir("/root/sd-scripts")
-    cmd_args = [
-            "accelerate",
-            "launch"
-    ] + args
-    _exec_subprocess(
-        cmd_args
-    )
+
+    import sdxl_train_network
+
+    sys.argv = args
+    sdxl_train_network.main()
+
+    # cmd_args = [
+    #         "accelerate",
+    #         "launch"
+    # ] + args
+    # _exec_subprocess(
+    #     cmd_args
+    # )
     model_volume.commit()
 
 
