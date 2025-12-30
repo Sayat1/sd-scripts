@@ -23,7 +23,7 @@ image = (
             "pkg-config"
         )
         .run_commands(
-            "echo rebuild-1",
+            "echo rebuild-3",
             "pip install --upgrade pip",
             "cd /root && git clone -b 'sd3' https://github.com/Sayat1/sd-scripts",
             "pip install -r /root/sd-scripts/requirements.txt",
@@ -57,6 +57,8 @@ def remote_main(args):
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
     sys.path.insert(0, "/root/sd-scripts")
     os.environ['DISABLE_TELEMETRY'] = 'YES'
+    os.environ['MODAL_ENV'] = "1"
+    
     # Check if we have DEBUG_TOOLKIT in env
     if os.environ.get("DEBUG_TOOLKIT", "0") == "1":
         # Set torch to trace mode
@@ -140,6 +142,7 @@ def local_main(commendtxt: str):
     dataset_filepath = ""
     lycoris_preset_path = ""
     cmd_list_str = ""
+    resume_folder_path = ""
     print(commendtxt)
     if os.path.exists(commendtxt):
         with open(commendtxt, "r", encoding="utf-8") as f:
@@ -159,8 +162,11 @@ def local_main(commendtxt: str):
         elif 'dataset_config' in str(arg):
             dataset_filepath = Path(args_list[i + 1])
             args_list[i + 1] = MOUNT_DIR + "dataset_modal.toml"
+        elif 'resume' in str(arg):
+            resume_folder_path = Path(args_list[i + 1])
+            args_list[i + 1] = MOUNT_DIR + "resume_backup"
         elif 'preset=' in str(arg):
-            preset_path = arg[6:]
+            preset_path = arg[7:]
             if is_probably_path(preset_path):
                 lycoris_preset_path = preset_path
                 args_list[i] = f"preset={str(MOUNT_DIR + Path(preset_path).name)}"
@@ -168,23 +174,30 @@ def local_main(commendtxt: str):
     print(args_list)
     local_dataset_dirs_dict = setup_toml(dataset_filepath)
     
-    upload_chekkpoint = True
+    upload_checkpoint = True
+    dataset_exists = False
     for file_entry in model_volume.iterdir(path="/", recursive=False):
         print(file_entry.path)
         if Path(checkpoint_filepath).name in file_entry.path:
             print("Found existing checkpoint in volume, skipping upload")
-            upload_chekkpoint = False
-            break
+            upload_checkpoint = False
+        elif file_entry.path == "dataset":
+            dataset_exists = True
 
-    if upload_chekkpoint:
+    if upload_checkpoint:
         with model_volume.batch_upload() as batch:
             batch.put_file(checkpoint_filepath, Path(checkpoint_filepath).name)
+
+    if dataset_exists:
+        model_volume.remove_file("dataset",recursive=True)
 
     with model_volume.batch_upload(force=True) as batch:
         batch.put_file("dataset_modal.toml", "dataset_modal.toml")
         
         for index, dataset_dir in local_dataset_dirs_dict.items():
             batch.put_directory(dataset_dir, "dataset/" + str(index))
+        if resume_folder_path != "":
+            batch.put_directory(resume_folder_path, "resume_backup")
         if lycoris_preset_path != "":
             batch.put_file(lycoris_preset_path, Path(lycoris_preset_path).name)
 
