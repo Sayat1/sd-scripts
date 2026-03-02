@@ -6016,7 +6016,7 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
     accelerator.save_state(state_dir)
     if args.save_state_to_huggingface:
         logger.info("uploading state to huggingface.")
-        huggingface_util.upload(args, state_dir, "/" + EPOCH_STATE_NAME.format(model_name, epoch_no))
+        huggingface_util.upload(args, state_dir, "/" + EPOCH_STATE_NAME.format("backup", epoch_no))
 
     last_n_epochs = args.save_last_n_epochs_state if args.save_last_n_epochs_state else args.save_last_n_epochs
     if last_n_epochs is not None:
@@ -6041,11 +6041,11 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
     state_root = os.path.join(args.output_dir , args.output_name, "backups")
     os.makedirs(state_root, exist_ok=True)
 
-    state_dir = os.path.join(state_root, STEP_STATE_NAME.format(model_name, step_no))
+    state_dir = os.path.join(state_root, STEP_STATE_NAME.format("backup", step_no))
     accelerator.save_state(state_dir)
     if args.save_state_to_huggingface:
         logger.info("uploading state to huggingface.")
-        huggingface_util.upload(args, state_dir, "/" + STEP_STATE_NAME.format(model_name, step_no))
+        huggingface_util.upload(args, state_dir, "/" + STEP_STATE_NAME.format("backup", step_no))
 
     last_n_steps = args.save_last_n_steps_state if args.save_last_n_steps_state else args.save_last_n_steps
     if last_n_steps is not None:
@@ -6055,7 +6055,7 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
         remove_step_no = remove_step_no - (remove_step_no % args.save_every_n_steps)
 
         if remove_step_no > 0:
-            state_dir_old = os.path.join(state_root, STEP_STATE_NAME.format(model_name, remove_step_no))
+            state_dir_old = os.path.join(state_root, STEP_STATE_NAME.format("backup", remove_step_no))
             if os.path.exists(state_dir_old):
                 logger.info(f"removing old state: {state_dir_old}")
                 sub_files = Path(state_dir_old).rglob("*.*")
@@ -6074,12 +6074,12 @@ def save_state_on_train_end(args: argparse.Namespace, accelerator):
     state_root = os.path.join(args.output_dir , args.output_name, "backups")
     os.makedirs(state_root, exist_ok=True)
 
-    state_dir = os.path.join(state_root, LAST_STATE_NAME.format(model_name))
+    state_dir = os.path.join(state_root, LAST_STATE_NAME.format("backup"))
     accelerator.save_state(state_dir)
 
     if args.save_state_to_huggingface:
         logger.info("uploading last state to huggingface.")
-        huggingface_util.upload(args, state_dir, "/" + LAST_STATE_NAME.format(model_name))
+        huggingface_util.upload(args, state_dir, "/" + LAST_STATE_NAME.format("backup"))
 
 
 def save_sd_model_on_train_end(
