@@ -6012,7 +6012,7 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
     state_root = os.path.join(args.output_dir , args.output_name, "backups")
     os.makedirs(state_root, exist_ok=True)
 
-    state_dir = os.path.join(state_root, EPOCH_STATE_NAME.format(model_name, epoch_no))
+    state_dir = os.path.join(state_root, EPOCH_STATE_NAME.format("backup", epoch_no))
     accelerator.save_state(state_dir)
     if args.save_state_to_huggingface:
         logger.info("uploading state to huggingface.")
@@ -6022,7 +6022,7 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
     if last_n_epochs is not None:
         from pathlib import Path
         remove_epoch_no = epoch_no - args.save_every_n_epochs * last_n_epochs
-        state_dir_old = os.path.join(state_root, EPOCH_STATE_NAME.format(model_name, remove_epoch_no))
+        state_dir_old = os.path.join(state_root, EPOCH_STATE_NAME.format("backup", remove_epoch_no))
         if os.path.exists(state_dir_old):
             logger.info(f"removing old state: {state_dir_old}")
             sub_files = Path(state_dir_old).rglob("*.*")
