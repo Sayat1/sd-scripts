@@ -23,7 +23,7 @@ image = (
             "pkg-config"
         )
         .run_commands(
-            "echo rebuild-3",
+            "echo rebuild-5",
             "pip install --upgrade pip",
             "cd /root && git clone -b 'sd3' https://github.com/Sayat1/sd-scripts",
             "pip install -r /root/sd-scripts/requirements.txt",
@@ -42,7 +42,7 @@ app = modal.App(name="modal-training")
 @app.function(
     # request a GPU with at least 24GB VRAM
     # more about modal GPU's: https://modal.com/docs/guide/gpu
-    gpu="H100", # gpu="H100" L40S
+    gpu="L40S", # gpu="H100" L40S
     # more about modal timeouts: https://modal.com/docs/guide/timeouts
     timeout=3600*3,  # 2 hours, increase or decrease if needed,
     image=image, 
@@ -101,6 +101,7 @@ def remote_main(args):
     #     cmd_args
     # )
     model_volume.commit()
+    model_volume.remove_file("dataset",recursive=True)
 
 
 def setup_toml(toml_path: Path) -> dict:
@@ -151,6 +152,7 @@ def local_main(commendtxt: str):
         raise FileNotFoundError(f"Command text file '{commendtxt}' not found.")
     args_list = cmd_list_str.split()
     print(args_list)
+    print(len(args_list))
     for i, arg in enumerate(args_list):
         if 'output_dir' in str(arg):
             args_list[i + 1] = output_dir
@@ -162,7 +164,7 @@ def local_main(commendtxt: str):
         elif 'dataset_config' in str(arg):
             dataset_filepath = Path(args_list[i + 1])
             args_list[i + 1] = MOUNT_DIR + "dataset_modal.toml"
-        elif 'resume' in str(arg):
+        elif '--resume' in str(arg):
             resume_folder_path = Path(args_list[i + 1])
             args_list[i + 1] = MOUNT_DIR + "resume_backup"
         elif 'preset=' in str(arg):
