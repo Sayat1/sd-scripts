@@ -5036,9 +5036,9 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
             optimizer_name = optimizer_kwargs.pop('optimizer_name')
         except KeyError:
             raise KeyError("optimizer_name is required in optimizer_args when using pytorch optimizers / pytorchのoptimizerを使用する場合、optimizer_argsにoptimizer_nameが必要です")
-        optimizer_class = pytorch_optimizer.load_optimizer(optimizer_name)
-        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
         use_orthograd = optimizer_kwargs.pop('use_orthograd',False)
+        optimizer_class = pytorch_optimizer.load_optimizer(optimizer_name)
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)        
         if use_orthograd:
             logger.info(f"use pytorch_optimizer orthograd")
             optimizer = pytorch_optimizer.OrthoGrad(optimizer, **optimizer_kwargs)
