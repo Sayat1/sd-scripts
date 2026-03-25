@@ -4921,18 +4921,10 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
     if args.optimizer_args is not None and len(args.optimizer_args) > 0:
         for arg in args.optimizer_args:
             key, value = arg.split("=")
-            value = ast.literal_eval(value)
-
-            # value = value.split(",")
-            # for i in range(len(value)):
-            #     if value[i].lower() == "true" or value[i].lower() == "false":
-            #         value[i] = value[i].lower() == "true"
-            #     else:
-            #         value[i] = ast.float(value[i])
-            # if len(value) == 1:
-            #     value = value[0]
-            # else:
-            #     value = tuple(value)
+            try:
+                value = ast.literal_eval(value)
+            except ValueError:
+                value = value #string 자체일 경우
 
             optimizer_kwargs[key] = value
     # logger.info(f"optkwargs {optimizer}_{kwargs}")
@@ -5038,7 +5030,18 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
 
         optimizer_class = torch.optim.SGD
         optimizer = optimizer_class(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
-
+    elif optimizer_type.startswith("pytorch".lower()):
+        import pytorch_optimizer
+        try:
+            optimizer_name = optimizer_kwargs.pop('optimizer_name')
+        except KeyError:
+            raise KeyError("optimizer_name is required in optimizer_args when using pytorch optimizers / pytorchのoptimizerを使用する場合、optimizer_argsにoptimizer_nameが必要です")
+        optimizer_class = pytorch_optimizer.load_optimizer(optimizer_name)
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+        use_orthograd = optimizer_kwargs.pop('use_orthograd',False)
+        if use_orthograd:
+            logger.info(f"use pytorch_optimizer orthograd")
+            optimizer = pytorch_optimizer.OrthoGrad(optimizer, **optimizer_kwargs)
     elif optimizer_type.startswith("DAdapt".lower()) or optimizer_type == "Prodigy".lower():
         # check lr and lr_count, and logger.info warning
         actual_lr = lr
