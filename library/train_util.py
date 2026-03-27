@@ -1625,26 +1625,30 @@ class BaseDataset(torch.utils.data.Dataset):
                         resize_interpolation=image_info.resize_interpolation,
                     )
                 else:
+                    im_h, im_w = img.shape[0:2]
+                    original_size = [im_w, im_h]
+                    crop_ltrb = (0, 0, 0, 0)
                     if face_cx > 0:  # 顔位置情報あり
                         img = self.crop_target(subset, img, face_cx, face_cy, face_w, face_h)
-                    elif im_h > self.height or im_w > self.width:
+                    elif im_h == self.height and im_w == self.width:
+                        pass
+                    else:
                         assert (
                             subset.random_crop
                         ), f"image too large, but cropping and bucketing are disabled / 画像サイズが大きいのでface_crop_aug_rangeかrandom_crop、またはbucketを有効にしてください: {image_info.absolute_path}"
-                        if im_h > self.height:
-                            p = random.randint(0, im_h - self.height)
+                        width_ratio = self.width / im_w
+                        height_ratio = self.height / im_h
+                        ratio = max(width_ratio, height_ratio)
+                        img = resize_image(img, im_w, im_h, round(im_w*ratio), round(im_h*ratio), resize_interpolation=image_info.resize_interpolation)
+                        resized_im_h, resized_im_w = img.shape[0:2]
+                        if resized_im_h > self.height:
+                            p = random.randint(0, resized_im_h - self.height)
                             img = img[p : p + self.height]
-                        if im_w > self.width:
-                            p = random.randint(0, im_w - self.width)
+                            crop_ltrb = (0, p, 0, 0)
+                        if resized_im_w > self.width:
+                            p = random.randint(0, resized_im_w - self.width)
                             img = img[:, p : p + self.width]
-
-                    im_h, im_w = img.shape[0:2]
-                    assert (
-                        im_h == self.height and im_w == self.width
-                    ), f"image size is small / 画像サイズが小さいようです: {image_info.absolute_path}"
-
-                    original_size = [im_w, im_h]
-                    crop_ltrb = (0, 0, 0, 0)
+                            crop_ltrb = (p, 0, 0, 0)
 
                 # augmentation
                 aug = self.aug_helper.get_augmentor(subset.color_aug)
