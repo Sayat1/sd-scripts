@@ -201,6 +201,7 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
         orig_size = batch["original_sizes_hw"]
         crop_size = batch["crop_top_lefts"]
         target_size = batch["target_sizes_hw"]
+        #print(f"orig_size:{orig_size}, crop_size:{crop_size}, target_size:{target_size}")
         embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
 
         # concat embeddings
