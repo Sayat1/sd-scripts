@@ -23,9 +23,9 @@ image = (
             "pkg-config"
         )
         .run_commands(
-            "echo rebuild-9",
+            "echo rebuild-10",
             "pip install --upgrade pip",
-            "cd /root && git clone -b 'sd3' https://github.com/Sayat1/sd-scripts",
+            "cd /root && git clone -b 'main' https://github.com/Sayat1/sd-scripts",
             "pip install -r /root/sd-scripts/requirements.txt",
             "pip install --force-reinstall --no-deps git+https://github.com/Sayat1/prodigy-plus-schedule-free.git@2.0.0",
             "pip install -U lycoris-lora",

@@ -423,7 +423,7 @@ class LatentsCachingStrategy:
     ) -> bool:
         raise NotImplementedError
 
-    def cache_batch_latents(self, model: Any, batch: List, flip_aug: bool, alpha_mask: bool, random_crop: bool):
+    def cache_batch_latents(self, model: Any, batch: List, flip_aug: bool, alpha_mask: bool, random_crop: bool, random_crop_variations: int = 1):
         raise NotImplementedError
 
     def _default_is_disk_cached_latents_expected(
@@ -434,6 +434,7 @@ class LatentsCachingStrategy:
         flip_aug: bool,
         apply_alpha_mask: bool,
         multi_resolution: bool = False,
+        random_crop_variations: int = 1,
     ) -> bool:
         """
         Args:
@@ -443,6 +444,7 @@ class LatentsCachingStrategy:
             flip_aug: whether to flip images
             apply_alpha_mask: whether to apply alpha mask
             multi_resolution: whether to use multi-resolution latents
+            random_crop_variations: number of random crop variations
 
         Returns:
             bool
@@ -462,14 +464,21 @@ class LatentsCachingStrategy:
         try:
             npz = np.load(npz_path)
 
-            # In old SD/SDXL npz files, if the actual latents shape does not match the expected shape, it doesn't raise an error as long as "latents" key exists (backward compatibility)
-            # In non-SD/SDXL npz files (multi-resolution support), the latents key always has the resolution suffix, and no latents key without suffix exists, so it raises an error if the expected resolution suffix key is not found (this doesn't change the behavior for non-SD/SDXL npz files).
-            if "latents" + key_reso_suffix not in npz and "latents" not in npz:
-                return False
-            if flip_aug and ("latents_flipped" + key_reso_suffix not in npz and "latents_flipped" not in npz):
-                return False
-            if apply_alpha_mask and ("alpha_mask" + key_reso_suffix not in npz and "alpha_mask" not in npz):
-                return False
+            for v in range(random_crop_variations):
+                v_suffix = f"_v{v}" if random_crop_variations > 1 else ""
+
+                # In old SD/SDXL npz files, if the actual latents shape does not match the expected shape, it doesn't raise an error as long as "latents" key exists (backward compatibility)
+                # In non-SD/SDXL npz files (multi-resolution support), the latents key always has the resolution suffix, and no latents key without suffix exists, so it raises an error if the expected resolution suffix key is not found (this doesn't change the behavior for non-SD/SDXL npz files).
+                if "latents" + key_reso_suffix + v_suffix not in npz and "latents" + v_suffix not in npz:
+                    return False
+                if flip_aug and (
+                    "latents_flipped" + key_reso_suffix + v_suffix not in npz and "latents_flipped" + v_suffix not in npz
+                ):
+                    return False
+                if apply_alpha_mask and (
+                    "alpha_mask" + key_reso_suffix + v_suffix not in npz and "alpha_mask" + v_suffix not in npz
+                ):
+                    return False
         except Exception as e:
             logger.error(f"Error loading file: {npz_path}")
             raise e
@@ -487,6 +496,7 @@ class LatentsCachingStrategy:
         apply_alpha_mask: bool,
         random_crop: bool,
         multi_resolution: bool = False,
+        random_crop_variations: int = 1,
     ):
         """
         Default implementation for cache_batch_latents. Image loading, VAE, flipping, alpha mask handling are common.
@@ -500,52 +510,76 @@ class LatentsCachingStrategy:
             apply_alpha_mask: whether to apply alpha mask
             random_crop: whether to random crop images
             multi_resolution: whether to use multi-resolution latents
+            random_crop_variations: number of random crop variations
 
         Returns:
             None
         """
         from library import train_util  # import here to avoid circular import
 
-        img_tensor, alpha_masks, original_sizes, crop_ltrbs = train_util.load_images_and_masks_for_caching(
-            image_infos, apply_alpha_mask, random_crop
-        )
-        img_tensor = img_tensor.to(device=vae_device, dtype=vae_dtype)
+        for v in range(random_crop_variations):
+            v_suffix = f"_v{v}" if random_crop_variations > 1 else ""
 
-        with torch.no_grad():
-            latents_tensors = encode_by_vae(img_tensor).to("cpu")
-        if flip_aug:
-            img_tensor = torch.flip(img_tensor, dims=[3])
+            img_tensor, alpha_masks, original_sizes, crop_ltrbs = train_util.load_images_and_masks_for_caching(
+                image_infos, apply_alpha_mask, random_crop
+            )
+            img_tensor = img_tensor.to(device=vae_device, dtype=vae_dtype)
+
             with torch.no_grad():
-                flipped_latents = encode_by_vae(img_tensor).to("cpu")
-        else:
-            flipped_latents = [None] * len(latents_tensors)
-
-        # for info, latents, flipped_latent, alpha_mask in zip(image_infos, latents_tensors, flipped_latents, alpha_masks):
-        for i in range(len(image_infos)):
-            info = image_infos[i]
-            latents = latents_tensors[i]
-            flipped_latent = flipped_latents[i]
-            alpha_mask = alpha_masks[i]
-            original_size = original_sizes[i]
-            crop_ltrb = crop_ltrbs[i]
-
-            latents_size = latents.shape[-2:]  # H, W (supports both 4D and 5D latents)
-            key_reso_suffix = f"_{latents_size[0]}x{latents_size[1]}" if multi_resolution else ""  # e.g. "_32x64", HxW
-
-            if self.cache_to_disk:
-                self.save_latents_to_disk(
-                    info.latents_npz, latents, original_size, crop_ltrb, flipped_latent, alpha_mask, key_reso_suffix
-                )
+                latents_tensors = encode_by_vae(img_tensor).to("cpu")
+            if flip_aug:
+                img_tensor_flipped = torch.flip(img_tensor, dims=[3])
+                with torch.no_grad():
+                    flipped_latents = encode_by_vae(img_tensor_flipped).to("cpu")
             else:
-                info.latents_original_size = original_size
-                info.latents_crop_ltrb = crop_ltrb
-                info.latents = latents
-                if flip_aug:
-                    info.latents_flipped = flipped_latent
-                info.alpha_mask = alpha_mask
+                flipped_latents = [None] * len(latents_tensors)
+
+            # for info, latents, flipped_latent, alpha_mask in zip(image_infos, latents_tensors, flipped_latents, alpha_masks):
+            for i in range(len(image_infos)):
+                info = image_infos[i]
+                latents = latents_tensors[i]
+                flipped_latent = flipped_latents[i]
+                alpha_mask = alpha_masks[i]
+                original_size = original_sizes[i]
+                crop_ltrb = crop_ltrbs[i]
+
+                latents_size = latents.shape[-2:]  # H, W (supports both 4D and 5D latents)
+                key_reso_suffix = f"_{latents_size[0]}x{latents_size[1]}" if multi_resolution else ""  # e.g. "_32x64", HxW
+
+                if self.cache_to_disk:
+                    self.save_latents_to_disk(
+                        info.latents_npz,
+                        latents,
+                        original_size,
+                        crop_ltrb,
+                        flipped_latent,
+                        alpha_mask,
+                        key_reso_suffix + v_suffix,
+                    )
+                else:
+                    if random_crop_variations > 1:
+                        if info.latents is None:
+                            info.latents = []
+                            info.latents_flipped = []
+                            info.latents_original_size = []
+                            info.latents_crop_ltrb = []
+                            info.alpha_mask = []
+
+                        info.latents.append(latents)
+                        info.latents_flipped.append(flipped_latent)
+                        info.latents_original_size.append(original_size)
+                        info.latents_crop_ltrb.append(crop_ltrb)
+                        info.alpha_mask.append(alpha_mask)
+                    else:
+                        info.latents_original_size = original_size
+                        info.latents_crop_ltrb = crop_ltrb
+                        info.latents = latents
+                        if flip_aug:
+                            info.latents_flipped = flipped_latent
+                        info.alpha_mask = alpha_mask
 
     def load_latents_from_disk(
-        self, npz_path: str, bucket_reso: Tuple[int, int]
+        self, npz_path: str, bucket_reso: Tuple[int, int], variation_index: Optional[int] = None
     ) -> Tuple[Optional[np.ndarray], Optional[List[int]], Optional[List[int]], Optional[np.ndarray], Optional[np.ndarray]]:
         """
         For single resolution architectures (currently no architecture is single resolution specific). Kept for reference.
@@ -553,6 +587,7 @@ class LatentsCachingStrategy:
         Args:
             npz_path (str): Path to the npz file.
             bucket_reso (Tuple[int, int]): The resolution of the bucket.
+            variation_index (Optional[int]): Index of the variation to load.
 
         Returns:
             Tuple[
@@ -563,16 +598,17 @@ class LatentsCachingStrategy:
                 Optional[np.ndarray]
             ]: Latent np tensors, original size, crop (left top, right bottom), flipped latents, alpha mask
         """
-        return self._default_load_latents_from_disk(None, npz_path, bucket_reso)
+        return self._default_load_latents_from_disk(None, npz_path, bucket_reso, variation_index)
 
     def _default_load_latents_from_disk(
-        self, latents_stride: Optional[int], npz_path: str, bucket_reso: Tuple[int, int]
+        self, latents_stride: Optional[int], npz_path: str, bucket_reso: Tuple[int, int], variation_index: Optional[int] = None
     ) -> Tuple[Optional[np.ndarray], Optional[List[int]], Optional[List[int]], Optional[np.ndarray], Optional[np.ndarray]]:
         """
         Args:
             latents_stride (Optional[int]): Stride for latents. If None, load all latents.
             npz_path (str): Path to the npz file.
             bucket_reso (Tuple[int, int]): The resolution of the bucket.
+            variation_index (Optional[int]): Index of the variation to load.
 
         Returns:
             Tuple[
@@ -589,24 +625,30 @@ class LatentsCachingStrategy:
             expected_latents_size = (bucket_reso[1] // latents_stride, bucket_reso[0] // latents_stride)  # bucket_reso is (W, H)
             key_reso_suffix = f"_{expected_latents_size[0]}x{expected_latents_size[1]}"  # e.g. "_32x64", HxW
 
+        v_suffix = f"_v{variation_index}" if variation_index is not None else ""
+
         npz = np.load(npz_path)
-        if "latents" + key_reso_suffix not in npz:
+        if "latents" + key_reso_suffix + v_suffix not in npz:
             # raise ValueError(f"latents{key_reso_suffix} not found in {npz_path}")
             # Fallback to old npz without resolution suffix
-            if "latents" not in npz:
-                raise ValueError(f"latents not found in {npz_path} (either with or without resolution suffix: {key_reso_suffix})")
+            if "latents" + v_suffix not in npz:
+                raise ValueError(
+                    f"latents not found in {npz_path} (either with or without resolution suffix: {key_reso_suffix}, variation suffix: {v_suffix})"
+                )
             if not self._warned_fallback_to_old_npz:
                 logger.warning(
-                    f"latents{key_reso_suffix} not found in {npz_path}. Falling back to latents without resolution suffix (old npz). This warning will only be shown once. To avoid this warning, please re-cache the latents with the latest version."
+                    f"latents{key_reso_suffix}{v_suffix} not found in {npz_path}. Falling back to latents without resolution suffix (old npz). This warning will only be shown once. To avoid this warning, please re-cache the latents with the latest version."
                 )
                 self._warned_fallback_to_old_npz = True
             key_reso_suffix = ""
 
-        latents = npz["latents" + key_reso_suffix]
-        original_size = npz["original_size" + key_reso_suffix].tolist()
-        crop_ltrb = npz["crop_ltrb" + key_reso_suffix].tolist()
-        flipped_latents = npz["latents_flipped" + key_reso_suffix] if "latents_flipped" + key_reso_suffix in npz else None
-        alpha_mask = npz["alpha_mask" + key_reso_suffix] if "alpha_mask" + key_reso_suffix in npz else None
+        latents = npz["latents" + key_reso_suffix + v_suffix]
+        original_size = npz["original_size" + key_reso_suffix + v_suffix].tolist()
+        crop_ltrb = npz["crop_ltrb" + key_reso_suffix + v_suffix].tolist()
+        flipped_latents = (
+            npz["latents_flipped" + key_reso_suffix + v_suffix] if "latents_flipped" + key_reso_suffix + v_suffix in npz else None
+        )
+        alpha_mask = npz["alpha_mask" + key_reso_suffix + v_suffix] if "alpha_mask" + key_reso_suffix + v_suffix in npz else None
         return latents, original_size, crop_ltrb, flipped_latents, alpha_mask
 
     def save_latents_to_disk(

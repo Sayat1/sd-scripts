@@ -129,7 +129,7 @@ def train(args):
     if cache_latents:
         assert (
             train_dataset_group.is_latent_cacheable()
-        ), "when caching latents, either color_aug or random_crop cannot be used / latentをキャッシュするときはcolor_augとrandom_cropは使えません"
+        ), "when caching latents, either color_aug or random_crop (without variations) cannot be used / latentをキャッシュするときはcolor_augまたはrandom_crop（バリエーション指定なし）は使えません"
 
     # acceleratorを準備する
     logger.info("prepare accelerator")

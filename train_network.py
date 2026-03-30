@@ -569,11 +569,11 @@ class NetworkTrainer:
         if cache_latents:
             assert (
                 train_dataset_group.is_latent_cacheable()
-            ), "when caching latents, either color_aug or random_crop cannot be used / latentをキャッシュするときはcolor_augとrandom_cropは使えません"
+            ), "when caching latents, either color_aug or random_crop (without variations) cannot be used / latentをキャッシュするときはcolor_augまたはrandom_crop（バリエーション指定なし）は使えません"
             if val_dataset_group is not None:
                 assert (
                     val_dataset_group.is_latent_cacheable()
-                ), "when caching latents, either color_aug or random_crop cannot be used / latentをキャッシュするときはcolor_augとrandom_cropは使えません"
+                ), "when caching latents, either color_aug or random_crop (without variations) cannot be used / latentをキャッシュするときはcolor_augまたはrandom_crop（バリエーション指定なし）は使えません"
 
         self.assert_extra_args(args, train_dataset_group, val_dataset_group)  # may change some args
 

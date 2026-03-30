@@ -425,6 +425,7 @@ class BaseSubset:
         flip_aug: bool,
         face_crop_aug_range: Optional[Tuple[float, float]],
         random_crop: bool,
+        random_crop_variations: int,
         caption_dropout_rate: float,
         caption_dropout_every_n_epochs: int,
         caption_tag_dropout_rate: float,
@@ -450,6 +451,7 @@ class BaseSubset:
         self.flip_aug = flip_aug
         self.face_crop_aug_range = face_crop_aug_range
         self.random_crop = random_crop
+        self.random_crop_variations = random_crop_variations
         self.caption_dropout_rate = caption_dropout_rate
         self.caption_dropout_every_n_epochs = caption_dropout_every_n_epochs
         self.caption_tag_dropout_rate = caption_tag_dropout_rate
@@ -489,6 +491,7 @@ class DreamBoothSubset(BaseSubset):
         flip_aug,
         face_crop_aug_range,
         random_crop,
+        random_crop_variations,
         caption_dropout_rate,
         caption_dropout_every_n_epochs,
         caption_tag_dropout_rate,
@@ -517,6 +520,7 @@ class DreamBoothSubset(BaseSubset):
             flip_aug,
             face_crop_aug_range,
             random_crop,
+            random_crop_variations,
             caption_dropout_rate,
             caption_dropout_every_n_epochs,
             caption_tag_dropout_rate,
@@ -1103,7 +1107,9 @@ class BaseDataset(torch.utils.data.Dataset):
         )
 
     def is_latent_cacheable(self):
-        return all([not subset.color_aug and not subset.random_crop for subset in self.subsets])
+        return all(
+            [not subset.color_aug and (not subset.random_crop or subset.random_crop_variations > 1) for subset in self.subsets]
+        )
 
     def is_text_encoder_output_cacheable(self, cache_supports_dropout: bool = False):
         return all(
@@ -1160,7 +1166,12 @@ class BaseDataset(torch.utils.data.Dataset):
             for info in batch:
                 if info.image is not None and isinstance(info.image, Future):
                     info.image = info.image.result()  # future to image
-            caching_strategy.cache_batch_latents(model, batch, cond.flip_aug, cond.alpha_mask, cond.random_crop)
+            
+            # get random_crop_variations from subset
+            subset = self.image_to_subset[batch[0].image_key]
+            random_crop_variations = subset.random_crop_variations if cond.random_crop else 1
+
+            caching_strategy.cache_batch_latents(model, batch, cond.flip_aug, cond.alpha_mask, cond.random_crop, random_crop_variations=random_crop_variations)
 
             # remove image from memory
             for info in batch:
@@ -1194,7 +1205,7 @@ class BaseDataset(torch.utils.data.Dataset):
                     # print(f"{process_index}/{num_processes} {i}/{len(image_infos)} {info.latents_npz}")
 
                     cache_available = caching_strategy.is_disk_cached_latents_expected(
-                        info.bucket_reso, info.latents_npz, subset.flip_aug, subset.alpha_mask
+                        info.bucket_reso, info.latents_npz, subset.flip_aug, subset.alpha_mask, random_crop_variations=subset.random_crop_variations
                     )
                     if cache_available:  # do not add to batch
                         continue
@@ -1596,19 +1607,35 @@ class BaseDataset(torch.utils.data.Dataset):
 
             # image/latentsを処理する
             if image_info.latents is not None:  # cache_latents=Trueの場合
-                original_size = image_info.latents_original_size
-                crop_ltrb = image_info.latents_crop_ltrb  # calc values later if flipped
-                if not flipped:
-                    latents = image_info.latents
-                    alpha_mask = image_info.alpha_mask
+                if isinstance(image_info.latents, list):
+                    v_idx = random.randint(0, len(image_info.latents) - 1)
+                    original_size = image_info.latents_original_size[v_idx]
+                    crop_ltrb = image_info.latents_crop_ltrb[v_idx]
+                    if not flipped:
+                        latents = image_info.latents[v_idx]
+                        alpha_mask = image_info.alpha_mask[v_idx]
+                    else:
+                        latents = image_info.latents_flipped[v_idx]
+                        alpha_mask = (
+                            None if image_info.alpha_mask[v_idx] is None else torch.flip(image_info.alpha_mask[v_idx], [1])
+                        )
                 else:
-                    latents = image_info.latents_flipped
-                    alpha_mask = None if image_info.alpha_mask is None else torch.flip(image_info.alpha_mask, [1])
+                    original_size = image_info.latents_original_size
+                    crop_ltrb = image_info.latents_crop_ltrb  # calc values later if flipped
+                    if not flipped:
+                        latents = image_info.latents
+                        alpha_mask = image_info.alpha_mask
+                    else:
+                        latents = image_info.latents_flipped
+                        alpha_mask = None if image_info.alpha_mask is None else torch.flip(image_info.alpha_mask, [1])
 
                 image = None
             elif image_info.latents_npz is not None:  # FineTuningDatasetまたはcache_latents_to_disk=Trueの場合
+                v_idx = random.randint(0, subset.random_crop_variations - 1) if subset.random_crop_variations > 1 else None
                 latents, original_size, crop_ltrb, flipped_latents, alpha_mask = (
-                    self.latents_caching_strategy.load_latents_from_disk(image_info.latents_npz, image_info.bucket_reso)
+                    self.latents_caching_strategy.load_latents_from_disk(
+                        image_info.latents_npz, image_info.bucket_reso, variation_index=v_idx
+                    )
                 )
                 if flipped:
                     latents = flipped_latents
@@ -4641,6 +4668,12 @@ def add_dataset_arguments(
         "--random_crop",
         action="store_true",
         help="enable random crop (for style training in face-centered crop augmentation) / ランダムな切り出しを有効にする（顔を中心としたaugmentationを行うときに画風の学習用に指定する）",
+    )
+    parser.add_argument(
+        "--random_crop_variations",
+        type=int,
+        default=1,
+        help="number of random crop variations when caching latents / latentをキャッシュするときにランダムクロップのバリエーション数を指定する",
     )
     parser.add_argument(
         "--debug_dataset",

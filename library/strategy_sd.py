@@ -157,22 +157,22 @@ class SdSdxlLatentsCachingStrategy(LatentsCachingStrategy):
             return old_npz_file
         return os.path.splitext(absolute_path)[0] + f"_{image_size[0]:04d}x{image_size[1]:04d}" + self.suffix
 
-    def is_disk_cached_latents_expected(self, bucket_reso: Tuple[int, int], npz_path: str, flip_aug: bool, alpha_mask: bool):
-        return self._default_is_disk_cached_latents_expected(8, bucket_reso, npz_path, flip_aug, alpha_mask, multi_resolution=True)
+    def is_disk_cached_latents_expected(self, bucket_reso: Tuple[int, int], npz_path: str, flip_aug: bool, alpha_mask: bool, random_crop_variations: int = 1):
+        return self._default_is_disk_cached_latents_expected(8, bucket_reso, npz_path, flip_aug, alpha_mask, multi_resolution=True, random_crop_variations=random_crop_variations)
 
     def load_latents_from_disk(
-        self, npz_path: str, bucket_reso: Tuple[int, int]
+        self, npz_path: str, bucket_reso: Tuple[int, int], variation_index: Optional[int] = None
     ) -> Tuple[Optional[np.ndarray], Optional[List[int]], Optional[List[int]], Optional[np.ndarray], Optional[np.ndarray]]:
-        return self._default_load_latents_from_disk(8, npz_path, bucket_reso)
+        return self._default_load_latents_from_disk(8, npz_path, bucket_reso, variation_index=variation_index)
 
     # TODO remove circular dependency for ImageInfo
-    def cache_batch_latents(self, vae, image_infos: List, flip_aug: bool, alpha_mask: bool, random_crop: bool):
+    def cache_batch_latents(self, vae, image_infos: List, flip_aug: bool, alpha_mask: bool, random_crop: bool, random_crop_variations: int = 1):
         encode_by_vae = lambda img_tensor: vae.encode(img_tensor).latent_dist.sample()
         vae_device = vae.device
         vae_dtype = vae.dtype
 
         self._default_cache_batch_latents(
-            encode_by_vae, vae_device, vae_dtype, image_infos, flip_aug, alpha_mask, random_crop, multi_resolution=True
+            encode_by_vae, vae_device, vae_dtype, image_infos, flip_aug, alpha_mask, random_crop, multi_resolution=True, random_crop_variations=random_crop_variations
         )
 
         if not train_util.HIGH_VRAM:

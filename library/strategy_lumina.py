@@ -308,6 +308,7 @@ class LuminaLatentsCachingStrategy(LatentsCachingStrategy):
         npz_path: str,
         flip_aug: bool,
         alpha_mask: bool,
+        random_crop_variations: int = 1,
     ) -> bool:
         """
         Args:
@@ -317,11 +318,11 @@ class LuminaLatentsCachingStrategy(LatentsCachingStrategy):
             alpha_mask (bool): Whether to apply
         """
         return self._default_is_disk_cached_latents_expected(
-            8, bucket_reso, npz_path, flip_aug, alpha_mask, multi_resolution=True
+            8, bucket_reso, npz_path, flip_aug, alpha_mask, multi_resolution=True, random_crop_variations=random_crop_variations
         )
 
     def load_latents_from_disk(
-        self, npz_path: str, bucket_reso: Tuple[int, int]
+        self, npz_path: str, bucket_reso: Tuple[int, int], variation_index: Optional[int] = None
     ) -> Tuple[
         Optional[np.ndarray],
         Optional[List[int]],
@@ -344,7 +345,7 @@ class LuminaLatentsCachingStrategy(LatentsCachingStrategy):
             ]: Tuple of latent tensors, attention_mask, input_ids, latents, latents_unet
         """
         return self._default_load_latents_from_disk(
-            8, npz_path, bucket_reso
+            8, npz_path, bucket_reso, variation_index=variation_index
         )  # support multi-resolution
 
     # TODO remove circular dependency for ImageInfo
@@ -355,6 +356,7 @@ class LuminaLatentsCachingStrategy(LatentsCachingStrategy):
         flip_aug: bool,
         alpha_mask: bool,
         random_crop: bool,
+        random_crop_variations: int = 1,
     ):
         encode_by_vae = lambda img_tensor: model.encode(img_tensor).to("cpu")
         vae_device = model.device
@@ -369,6 +371,7 @@ class LuminaLatentsCachingStrategy(LatentsCachingStrategy):
             alpha_mask,
             random_crop,
             multi_resolution=True,
+            random_crop_variations=random_crop_variations,
         )
 
         if not train_util.HIGH_VRAM:
