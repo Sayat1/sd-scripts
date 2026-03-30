@@ -3025,17 +3025,20 @@ def trim_and_resize_if_required(
         p = trim_size // 2 if not random_crop else random.randint(0, trim_size)
         # logger.info(f"w {trim_size} {p}")
         image = image[:, p : p + reso[0]]
+        crop_ltrb = (p, 0, p + reso[0], image_height)
     if image_height > reso[1]:
         trim_size = image_height - reso[1]
         #p = trim_size // 2 if not random_crop else random.randint(0, trim_size)
         p = 0 if not random_crop else random.randint(0, trim_size)
         # logger.info(f"h {trim_size} {p})
         image = image[p : p + reso[1]]
+        crop_ltrb = (0, p, image_width, p + reso[1])
 
     # random cropの場合のcropされた値をどうcrop left/topに反映するべきか全くアイデアがない
     # I have no idea how to reflect the cropped value in crop left/top in the case of random crop
 
-    crop_ltrb = BucketManager.get_crop_ltrb(reso, original_size)
+    if not random_crop:
+        crop_ltrb = BucketManager.get_crop_ltrb(reso, original_size)
 
     assert image.shape[0] == reso[1] and image.shape[1] == reso[0], f"internal error, illegal trimmed size: {image.shape}, {reso}"
     return image, original_size, crop_ltrb
