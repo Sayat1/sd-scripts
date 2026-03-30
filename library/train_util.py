@@ -3019,7 +3019,7 @@ def trim_and_resize_if_required(
         image = resize_image(image, image_width, image_height, resized_size[0], resized_size[1], resize_interpolation)
 
     image_height, image_width = image.shape[0:2]
-
+    crop_ltrb = (0, 0, image_width, image_height)  # default no crop
     if image_width > reso[0]:
         trim_size = image_width - reso[0]
         p = trim_size // 2 if not random_crop else random.randint(0, trim_size)
