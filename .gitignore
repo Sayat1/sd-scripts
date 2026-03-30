@@ -13,3 +13,5 @@ GEMINI.md
 MagicMock
 .codex-tmp
 references
+/output/
+/clipoutput
