@@ -17,9 +17,15 @@ import numpy as np
 def fire_in_thread(f, *args, **kwargs):
     threading.Thread(target=f, args=args, kwargs=kwargs).start()
 
-
-# region Logging
-
+def colab_delete_file(file_path):
+  import os
+  try:
+    with open(str(file_path),'w') as f:
+      pass
+    os.remove(str(file_path))
+    return True
+  except Exception:
+    return False
 
 def add_logging_arguments(parser):
     parser.add_argument(

@@ -165,6 +165,42 @@ def _load_state_dict_on_device(model, state_dict, device, dtype=None):
 
     raise RuntimeError("Error(s) in loading state_dict for {}:\n\t{}".format(model.__class__.__name__, "\n\t".join(error_msgs)))
 
+def load_vae_from_sdxl_checkpoint(ckpt_path, map_location, dtype=None):
+    # Load the state dict
+    if model_util.is_safetensors(ckpt_path):
+        checkpoint = None
+        try:
+            state_dict = load_file(ckpt_path, device=map_location)
+        except:
+            state_dict = load_file(ckpt_path)  # prevent device invalid Error
+        epoch = None
+        global_step = None
+    else:
+        checkpoint = torch.load(ckpt_path, map_location=map_location)
+        if "state_dict" in checkpoint:
+            state_dict = checkpoint["state_dict"]
+            epoch = checkpoint.get("epoch", 0)
+            global_step = checkpoint.get("global_step", 0)
+        else:
+            state_dict = checkpoint
+            epoch = 0
+            global_step = 0
+        checkpoint = None
+    
+    # prepare vae
+    logger.info("building VAE")
+    vae_config = model_util.create_vae_diffusers_config()
+    with init_empty_weights():
+        vae = AutoencoderKL(**vae_config)
+
+    logger.info("loading VAE from checkpoint")
+    converted_vae_checkpoint = model_util.convert_ldm_vae_checkpoint(state_dict, vae_config)
+    info = _load_state_dict_on_device(vae, converted_vae_checkpoint, device=map_location, dtype=dtype)
+    state_dict = None
+    logger.info(f"VAE: {info}")
+
+    return vae
+    
 
 def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dtype=None, disable_mmap=False):
     # model_version is reserved for future use
@@ -274,11 +310,11 @@ def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dty
     if "text_model.embeddings.position_ids" in te1_sd:
         te1_sd.pop("text_model.embeddings.position_ids")
 
-    info1 = _load_state_dict_on_device(text_model1, te1_sd, device=map_location)  # remain fp32
+    info1 = _load_state_dict_on_device(text_model1, te1_sd, device=map_location, dtype=torch.float32)  # remain fp32
     logger.info(f"text encoder 1: {info1}")
 
     converted_sd, logit_scale = convert_sdxl_text_encoder_2_checkpoint(te2_sd, max_length=77)
-    info2 = _load_state_dict_on_device(text_model2, converted_sd, device=map_location)  # remain fp32
+    info2 = _load_state_dict_on_device(text_model2, converted_sd, device=map_location, dtype=torch.float32)  # remain fp32
     logger.info(f"text encoder 2: {info2}")
 
     # prepare vae
@@ -291,6 +327,11 @@ def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dty
     converted_vae_checkpoint = model_util.convert_ldm_vae_checkpoint(state_dict, vae_config)
     info = _load_state_dict_on_device(vae, converted_vae_checkpoint, device=map_location, dtype=dtype)
     logger.info(f"VAE: {info}")
+
+    del unet_sd
+    del state_dict
+    del te1_sd
+    del te2_sd
 
     ckpt_info = (epoch, global_step) if epoch is not None else None
     return text_model1, text_model2, vae, unet, logit_scale, ckpt_info

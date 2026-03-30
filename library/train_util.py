@@ -74,7 +74,7 @@ import library.model_util as model_util
 import library.huggingface_util as huggingface_util
 import library.sai_model_spec as sai_model_spec
 import library.deepspeed_utils as deepspeed_utils
-from library.utils import setup_logging, resize_image, validate_interpolation_fn
+from library.utils import setup_logging, resize_image, validate_interpolation_fn, colab_delete_file
 
 setup_logging()
 import logging
@@ -837,7 +837,10 @@ class BaseDataset(torch.utils.data.Dataset):
         )
 
         if is_drop_out:
-            caption = ""
+            if hasattr(subset, 'class_tokens'):
+                caption = subset.class_tokens
+            else:
+                caption = ""
         else:
             # process wildcards
             if subset.enable_wildcard:
@@ -1632,26 +1635,30 @@ class BaseDataset(torch.utils.data.Dataset):
                         resize_interpolation=image_info.resize_interpolation,
                     )
                 else:
+                    im_h, im_w = img.shape[0:2]
+                    original_size = [im_w, im_h]
+                    crop_ltrb = (0, 0, 0, 0)
                     if face_cx > 0:  # 顔位置情報あり
                         img = self.crop_target(subset, img, face_cx, face_cy, face_w, face_h)
-                    elif im_h > self.height or im_w > self.width:
+                    elif im_h == self.height and im_w == self.width:
+                        pass
+                    else:
                         assert (
                             subset.random_crop
                         ), f"image too large, but cropping and bucketing are disabled / 画像サイズが大きいのでface_crop_aug_rangeかrandom_crop、またはbucketを有効にしてください: {image_info.absolute_path}"
-                        if im_h > self.height:
-                            p = random.randint(0, im_h - self.height)
+                        width_ratio = self.width / im_w
+                        height_ratio = self.height / im_h
+                        ratio = max(width_ratio, height_ratio)
+                        img = resize_image(img, im_w, im_h, round(im_w*ratio), round(im_h*ratio), resize_interpolation=image_info.resize_interpolation)
+                        resized_im_h, resized_im_w = img.shape[0:2]
+                        if resized_im_h > self.height:
+                            p = random.randint(0, resized_im_h - self.height)
                             img = img[p : p + self.height]
-                        if im_w > self.width:
-                            p = random.randint(0, im_w - self.width)
+                            crop_ltrb = (0, p, 0, 0)
+                        if resized_im_w > self.width:
+                            p = random.randint(0, resized_im_w - self.width)
                             img = img[:, p : p + self.width]
-
-                    im_h, im_w = img.shape[0:2]
-                    assert (
-                        im_h == self.height and im_w == self.width
-                    ), f"image size is small / 画像サイズが小さいようです: {image_info.absolute_path}"
-
-                    original_size = [im_w, im_h]
-                    crop_ltrb = (0, 0, 0, 0)
+                            crop_ltrb = (p, 0, 0, 0)
 
                 # augmentation
                 aug = self.aug_helper.get_augmentor(subset.color_aug)
@@ -3028,22 +3035,28 @@ def trim_and_resize_if_required(
         image = resize_image(image, image_width, image_height, resized_size[0], resized_size[1], resize_interpolation)
 
     image_height, image_width = image.shape[0:2]
-
+    crop_ltrb = (0, 0, image_width, image_height)  # default no crop
     if image_width > reso[0]:
         trim_size = image_width - reso[0]
         p = trim_size // 2 if not random_crop else random.randint(0, trim_size)
         # logger.info(f"w {trim_size} {p}")
         image = image[:, p : p + reso[0]]
+        if random_crop:
+            crop_ltrb = (p, 0, p + reso[0], image_height)
     if image_height > reso[1]:
         trim_size = image_height - reso[1]
-        p = trim_size // 2 if not random_crop else random.randint(0, trim_size)
+        #p = trim_size // 2 if not random_crop else random.randint(0, trim_size)
+        p = 0 if not random_crop else random.randint(0, trim_size)
         # logger.info(f"h {trim_size} {p})
         image = image[p : p + reso[1]]
+        if random_crop:
+            crop_ltrb = (0, p, image_width, p + reso[1])
 
     # random cropの場合のcropされた値をどうcrop left/topに反映するべきか全くアイデアがない
     # I have no idea how to reflect the cropped value in crop left/top in the case of random crop
 
-    crop_ltrb = BucketManager.get_crop_ltrb(reso, original_size)
+    if not random_crop:
+        crop_ltrb = BucketManager.get_crop_ltrb(reso, original_size)
 
     assert image.shape[0] == reso[1] and image.shape[1] == reso[0], f"internal error, illegal trimmed size: {image.shape}, {reso}"
     return image, original_size, crop_ltrb
@@ -3755,6 +3768,13 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument("--learning_rate", type=float, default=2.0e-6, help="learning rate / 学習率")
+
+    parser.add_argument(
+        "--scale_lr_by_batch",
+        action="store_true",
+        help="scale learning rate by batch size(sqrt) / バッチサイズに応じて学習率をスケーリングする",
+    )
+
     parser.add_argument(
         "--max_grad_norm",
         default=1.0,
@@ -3783,6 +3803,14 @@ def add_optimizer_arguments(parser: argparse.ArgumentParser):
     #     nargs="*",
     #     help='additional arguments for schedulefree_wrapper (like "momentum=0.9 weight_decay_at_y=0.1 ...") / オプティマイザの追加引数（例： "momentum=0.9 weight_decay_at_y=0.1 ..."）',
     # )
+
+    parser.add_argument(
+        "--text_encoder_start_step",
+        type=int_or_float,
+        default=0,
+        help="Int number of steps for the turning on the TE (default is 0) or float with ratio of train steps"
+        " / 学習率のスケジューラをウォームアップするステップ数（デフォルト0）、または学習ステップの比率（1未満のfloat値の場合）",
+    )
 
     parser.add_argument("--lr_scheduler_type", type=str, default="", help="custom scheduler module / 使用するスケジューラ")
     parser.add_argument(
@@ -4301,6 +4329,12 @@ def add_masked_loss_arguments(parser: argparse.ArgumentParser):
         "--masked_loss",
         action="store_true",
         help="apply mask for calculating loss. conditioning_data_dir is required for dataset. / 損失計算時にマスクを適用する。datasetにはconditioning_data_dirが必要",
+    )
+    parser.add_argument(
+        "--minimum_masked_loss_weight",
+        type=float,
+        default=0.0,
+        help="mask weight for body region(alpha<0.2) in masked loss (default is 0) / マスク損失における顔領域のマスクの重み（デフォルトは1.0）",
     )
 
 
@@ -4921,18 +4955,10 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
     if args.optimizer_args is not None and len(args.optimizer_args) > 0:
         for arg in args.optimizer_args:
             key, value = arg.split("=")
-            value = ast.literal_eval(value)
-
-            # value = value.split(",")
-            # for i in range(len(value)):
-            #     if value[i].lower() == "true" or value[i].lower() == "false":
-            #         value[i] = value[i].lower() == "true"
-            #     else:
-            #         value[i] = ast.float(value[i])
-            # if len(value) == 1:
-            #     value = value[0]
-            # else:
-            #     value = tuple(value)
+            try:
+                value = ast.literal_eval(value)
+            except ValueError:
+                value = value #string 자체일 경우
 
             optimizer_kwargs[key] = value
     # logger.info(f"optkwargs {optimizer}_{kwargs}")
@@ -5038,7 +5064,18 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
 
         optimizer_class = torch.optim.SGD
         optimizer = optimizer_class(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
-
+    elif optimizer_type.startswith("pytorch".lower()):
+        import pytorch_optimizer
+        try:
+            optimizer_name = optimizer_kwargs.pop('optimizer_name')
+        except KeyError:
+            raise KeyError("optimizer_name is required in optimizer_args when using pytorch optimizers / pytorchのoptimizerを使用する場合、optimizer_argsにoptimizer_nameが必要です")
+        use_orthograd = optimizer_kwargs.pop('use_orthograd',False)
+        optimizer_class = pytorch_optimizer.load_optimizer(optimizer_name)
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)        
+        if use_orthograd:
+            logger.info(f"use pytorch_optimizer orthograd")
+            optimizer = pytorch_optimizer.OrthoGrad(optimizer, **optimizer_kwargs)
     elif optimizer_type.startswith("DAdapt".lower()) or optimizer_type == "Prodigy".lower():
         # check lr and lr_count, and logger.info warning
         actual_lr = lr
@@ -5329,10 +5366,6 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
     """
     Unified API to get any scheduler from its name.
     """
-    # if schedulefree optimizer, return dummy scheduler
-    if is_schedulefree_optimizer(optimizer, args):
-        return get_dummy_scheduler(optimizer)
-
     name = args.lr_scheduler
     num_training_steps = args.max_train_steps * num_processes  # * args.gradient_accumulation_steps
     num_warmup_steps: Optional[int] = (
@@ -5346,6 +5379,15 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
     power = args.lr_scheduler_power
     timescale = args.lr_scheduler_timescale
     min_lr_ratio = args.lr_scheduler_min_lr_ratio
+
+    if args.text_encoder_start_step > 0:
+        args.text_encoder_start_step = (
+            int(args.text_encoder_start_step * num_training_steps) if isinstance(args.text_encoder_start_step, float) else args.text_encoder_start_step
+            )
+
+    # if schedulefree optimizer, return dummy scheduler after some args are set
+    if is_schedulefree_optimizer(optimizer, args):
+        return get_dummy_scheduler(optimizer)
 
     lr_scheduler_kwargs = {}  # get custom lr_scheduler kwargs
     if args.lr_scheduler_args is not None and len(args.lr_scheduler_args) > 0:
@@ -5973,7 +6015,7 @@ def save_sd_model_on_epoch_end_or_stepwise_common(
             remove_ckpt_file = os.path.join(args.output_dir, remove_ckpt_name)
             if os.path.exists(remove_ckpt_file):
                 logger.info(f"removing old checkpoint: {remove_ckpt_file}")
-                os.remove(remove_ckpt_file)
+                colab_delete_file(remove_ckpt_file)
 
     else:
         if on_epoch_end:
@@ -6012,20 +6054,27 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
     logger.info("")
     logger.info(f"saving state at epoch {epoch_no}")
     os.makedirs(args.output_dir, exist_ok=True)
+    state_root = os.path.join(args.output_dir , args.output_name, "backups")
+    os.makedirs(state_root, exist_ok=True)
 
-    state_dir = os.path.join(args.output_dir, EPOCH_STATE_NAME.format(model_name, epoch_no))
+    state_dir = os.path.join(state_root, EPOCH_STATE_NAME.format("backup", epoch_no))
     accelerator.save_state(state_dir)
     if args.save_state_to_huggingface:
         logger.info("uploading state to huggingface.")
-        huggingface_util.upload(args, state_dir, "/" + EPOCH_STATE_NAME.format(model_name, epoch_no))
+        huggingface_util.upload(args, state_dir, "/" + EPOCH_STATE_NAME.format("backup", epoch_no))
 
     last_n_epochs = args.save_last_n_epochs_state if args.save_last_n_epochs_state else args.save_last_n_epochs
     if last_n_epochs is not None:
+        from pathlib import Path
         remove_epoch_no = epoch_no - args.save_every_n_epochs * last_n_epochs
-        state_dir_old = os.path.join(args.output_dir, EPOCH_STATE_NAME.format(model_name, remove_epoch_no))
+        state_dir_old = os.path.join(state_root, EPOCH_STATE_NAME.format("backup", remove_epoch_no))
         if os.path.exists(state_dir_old):
             logger.info(f"removing old state: {state_dir_old}")
-            shutil.rmtree(state_dir_old)
+            sub_files = Path(state_dir_old).rglob("*.*")
+            for sub_file in sub_files:
+                if not sub_file.is_dir():
+                    colab_delete_file(sub_file)
+            #shutil.rmtree(state_dir_old)
 
 
 def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_no):
@@ -6034,24 +6083,31 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
     logger.info("")
     logger.info(f"saving state at step {step_no}")
     os.makedirs(args.output_dir, exist_ok=True)
+    state_root = os.path.join(args.output_dir , args.output_name, "backups")
+    os.makedirs(state_root, exist_ok=True)
 
-    state_dir = os.path.join(args.output_dir, STEP_STATE_NAME.format(model_name, step_no))
+    state_dir = os.path.join(state_root, STEP_STATE_NAME.format("backup", step_no))
     accelerator.save_state(state_dir)
     if args.save_state_to_huggingface:
         logger.info("uploading state to huggingface.")
-        huggingface_util.upload(args, state_dir, "/" + STEP_STATE_NAME.format(model_name, step_no))
+        huggingface_util.upload(args, state_dir, "/" + STEP_STATE_NAME.format("backup", step_no))
 
     last_n_steps = args.save_last_n_steps_state if args.save_last_n_steps_state else args.save_last_n_steps
     if last_n_steps is not None:
+        from pathlib import Path
         # last_n_steps前のstep_noから、save_every_n_stepsの倍数のstep_noを計算して削除する
         remove_step_no = step_no - last_n_steps - 1
         remove_step_no = remove_step_no - (remove_step_no % args.save_every_n_steps)
 
         if remove_step_no > 0:
-            state_dir_old = os.path.join(args.output_dir, STEP_STATE_NAME.format(model_name, remove_step_no))
+            state_dir_old = os.path.join(state_root, STEP_STATE_NAME.format("backup", remove_step_no))
             if os.path.exists(state_dir_old):
                 logger.info(f"removing old state: {state_dir_old}")
-                shutil.rmtree(state_dir_old)
+                sub_files = Path(state_dir_old).rglob("*.*")
+                for sub_file in sub_files:
+                    if not sub_file.is_dir():
+                        colab_delete_file(sub_file)
+                #shutil.rmtree(state_dir_old)
 
 
 def save_state_on_train_end(args: argparse.Namespace, accelerator):
@@ -6060,13 +6116,15 @@ def save_state_on_train_end(args: argparse.Namespace, accelerator):
     logger.info("")
     logger.info("saving last state.")
     os.makedirs(args.output_dir, exist_ok=True)
+    state_root = os.path.join(args.output_dir , args.output_name, "backups")
+    os.makedirs(state_root, exist_ok=True)
 
-    state_dir = os.path.join(args.output_dir, LAST_STATE_NAME.format(model_name))
+    state_dir = os.path.join(state_root, LAST_STATE_NAME.format("backup"))
     accelerator.save_state(state_dir)
 
     if args.save_state_to_huggingface:
         logger.info("uploading last state to huggingface.")
-        huggingface_util.upload(args, state_dir, "/" + LAST_STATE_NAME.format(model_name))
+        huggingface_util.upload(args, state_dir, "/" + LAST_STATE_NAME.format("backup"))
 
 
 def save_sd_model_on_train_end(

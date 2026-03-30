@@ -10,7 +10,7 @@ init_ipex()
 
 from accelerate import init_empty_weights
 from tqdm import tqdm
-from transformers import CLIPTokenizer
+from transformers import CLIPTokenizer,PretrainedConfig
 from library import model_util, sdxl_model_util, train_util, sdxl_original_unet
 from .utils import setup_logging
 
@@ -23,6 +23,30 @@ TOKENIZER1_PATH = "openai/clip-vit-large-patch14"
 TOKENIZER2_PATH = "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k"
 
 # DEFAULT_NOISE_OFFSET = 0.0357
+
+def load_vae_only(args, accelerator, weight_dtype):
+    name_or_path = args.pretrained_model_name_or_path
+    name_or_path = os.readlink(name_or_path) if os.path.islink(name_or_path) else name_or_path
+    vae_path = args.vae
+    load_stable_diffusion_format = os.path.isfile(name_or_path)  # determine SD or Diffusers
+
+    if vae_path is not None:
+        vae = model_util.load_vae(vae_path, weight_dtype)
+        logger.info("additional VAE loaded")
+        return vae
+    
+    if load_stable_diffusion_format:
+        vae = sdxl_model_util.load_vae_from_sdxl_checkpoint(name_or_path, accelerator.device if args.lowram else "cpu", weight_dtype)
+    else:
+        from diffusers import AutoencoderKL
+        vae = AutoencoderKL.from_pretrained(
+            name_or_path,
+            subfolder="vae" if vae_path is None else None,
+            revision=None,
+            variant=None,
+        )
+
+    return vae
 
 
 def load_target_model(args, accelerator, model_version: str, weight_dtype):
@@ -61,6 +85,24 @@ def load_target_model(args, accelerator, model_version: str, weight_dtype):
 
     return load_stable_diffusion_format, text_encoder1, text_encoder2, vae, unet, logit_scale, ckpt_info
 
+def import_model_class_from_model_name_or_path(
+    pretrained_model_name_or_path: str, revision: str, subfolder: str = "text_encoder"
+):
+    text_encoder_config = PretrainedConfig.from_pretrained(
+        pretrained_model_name_or_path, subfolder=subfolder, revision=revision
+    )
+    model_class = text_encoder_config.architectures[0]
+
+    if model_class == "CLIPTextModel":
+        from transformers import CLIPTextModel
+
+        return CLIPTextModel
+    elif model_class == "CLIPTextModelWithProjection":
+        from transformers import CLIPTextModelWithProjection
+
+        return CLIPTextModelWithProjection
+    else:
+        raise ValueError(f"{model_class} is not supported.")
 
 def _load_target_model(
     name_or_path: str, vae_path: Optional[str], model_version: str, weight_dtype, device="cpu", model_dtype=None, disable_mmap=False
@@ -78,32 +120,32 @@ def _load_target_model(
             unet,
             logit_scale,
             ckpt_info,
-        ) = sdxl_model_util.load_models_from_sdxl_checkpoint(model_version, name_or_path, device, model_dtype, disable_mmap)
+        ) = sdxl_model_util.load_models_from_sdxl_checkpoint(model_version, name_or_path, device, weight_dtype, disable_mmap)
     else:
         # Diffusers model is loaded to CPU
-        from diffusers import StableDiffusionXLPipeline
+        from diffusers import AutoencoderKL,UNet2DConditionModel
 
-        variant = "fp16" if weight_dtype == torch.float16 else None
-        logger.info(f"load Diffusers pretrained models: {name_or_path}, variant={variant}")
-        try:
-            try:
-                pipe = StableDiffusionXLPipeline.from_pretrained(
-                    name_or_path, torch_dtype=model_dtype, variant=variant, tokenizer=None
-                )
-            except EnvironmentError as ex:
-                if variant is not None:
-                    logger.info("try to load fp32 model")
-                    pipe = StableDiffusionXLPipeline.from_pretrained(name_or_path, variant=None, tokenizer=None)
-                else:
-                    raise ex
-        except EnvironmentError as ex:
-            logger.error(
-                f"model is not found as a file or in Hugging Face, perhaps file name is wrong? / 指定したモデル名のファイル、またはHugging Faceのモデルが見つかりません。ファイル名が誤っているかもしれません: {name_or_path}"
-            )
-            raise ex
+        text_encoder1 = import_model_class_from_model_name_or_path(name_or_path,revision=None).from_pretrained(
+            name_or_path, subfolder="text_encoder", revision=None, variant=None, torch_dtype=torch.float32, device_map="auto",
+        )
+        text_encoder2 = import_model_class_from_model_name_or_path(name_or_path,revision=None,subfolder="text_encoder_2").from_pretrained(
+            name_or_path, subfolder="text_encoder_2", revision=None, variant=None, torch_dtype=torch.float32, device_map="auto",
+        )
 
-        text_encoder1 = pipe.text_encoder
-        text_encoder2 = pipe.text_encoder_2
+        vae_load_path = (
+            name_or_path
+            if vae_path is None
+            else vae_path
+        )
+        vae = AutoencoderKL.from_pretrained(
+            vae_load_path,
+            subfolder="vae" if vae_path is None else None,
+            revision=None,
+            variant=None,
+        )
+        unet = UNet2DConditionModel.from_pretrained(
+            name_or_path, subfolder="unet", revision=None, variant=None, torch_dtype=weight_dtype, device_map="auto",
+        )
 
         # convert to fp32 for cache text_encoders outputs
         if text_encoder1.dtype != torch.float32:
@@ -111,16 +153,13 @@ def _load_target_model(
         if text_encoder2.dtype != torch.float32:
             text_encoder2 = text_encoder2.to(dtype=torch.float32)
 
-        vae = pipe.vae
-        unet = pipe.unet
-        del pipe
-
         # Diffusers U-Net to original U-Net
         state_dict = sdxl_model_util.convert_diffusers_unet_state_dict_to_sdxl(unet.state_dict())
         with init_empty_weights():
             unet = sdxl_original_unet.SdxlUNet2DConditionModel()  # overwrite unet
-        sdxl_model_util._load_state_dict_on_device(unet, state_dict, device=device, dtype=model_dtype)
+        sdxl_model_util._load_state_dict_on_device(unet, state_dict, device=device, dtype=weight_dtype)
         logger.info("U-Net converted to original U-Net")
+        del state_dict
 
         logit_scale = None
         ckpt_info = None

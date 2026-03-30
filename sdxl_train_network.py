@@ -44,6 +44,9 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
         if val_dataset_group is not None:
             val_dataset_group.verify_bucket_reso_steps(32)
 
+    def load_vae_only(self, args, weight_dtype, accelerator):
+        return sdxl_train_util.load_vae_only(args, accelerator, weight_dtype)
+
     def load_target_model(self, args, weight_dtype, accelerator):
         (
             load_stable_diffusion_format,
@@ -112,8 +115,9 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
                 dataset.new_cache_text_encoder_outputs(text_encoders + [accelerator.unwrap_model(text_encoders[-1])], accelerator)
             accelerator.wait_for_everyone()
 
-            text_encoders[0].to("cpu", dtype=torch.float32)  # Text Encoder doesn't work with fp16 on CPU
-            text_encoders[1].to("cpu", dtype=torch.float32)
+            if not args.lowram:
+                text_encoders[0].to("cpu", dtype=torch.float32)  # Text Encoder doesn't work with fp16 on CPU
+                text_encoders[1].to("cpu", dtype=torch.float32)
             clean_memory_on_device(accelerator.device)
 
             if not args.lowram:
@@ -197,6 +201,7 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
         orig_size = batch["original_sizes_hw"]
         crop_size = batch["crop_top_lefts"]
         target_size = batch["target_sizes_hw"]
+        #print(f"orig_size:{orig_size}, crop_size:{crop_size}, target_size:{target_size}")
         embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
 
         # concat embeddings
@@ -222,8 +227,7 @@ def setup_parser() -> argparse.ArgumentParser:
     sdxl_train_util.add_sdxl_training_arguments(parser)
     return parser
 
-
-if __name__ == "__main__":
+def main():
     parser = setup_parser()
 
     args = parser.parse_args()
@@ -232,3 +236,6 @@ if __name__ == "__main__":
 
     trainer = SdxlNetworkTrainer()
     trainer.train(args)
+
+if __name__ == "__main__":
+    main()
