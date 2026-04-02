@@ -23,7 +23,7 @@ image = (
             "pkg-config"
         )
         .run_commands(
-            "echo rebuild-10",
+            "echo rebuild-11",
             "pip install --upgrade pip",
             "cd /root && git clone -b 'main' https://github.com/Sayat1/sd-scripts",
             "pip install -r /root/sd-scripts/requirements.txt",

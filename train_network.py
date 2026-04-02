@@ -236,6 +236,7 @@ class NetworkTrainer:
         prepare_scheduler_for_custom_training(noise_scheduler, device)
         if args.zero_terminal_snr:
             custom_train_functions.fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler)
+        noise_scheduler.alphas_cumprod = noise_scheduler.alphas_cumprod.to(device)
         return noise_scheduler
 
     def encode_images_to_latents(self, args, vae: AutoencoderKL, images: torch.FloatTensor) -> torch.FloatTensor:
@@ -457,7 +458,8 @@ class NetworkTrainer:
         if weighting is not None:
             loss = loss * weighting
         if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
-            loss = apply_masked_loss(loss, batch, min_mask=args.minimum_masked_loss_weight)
+            mask_weights = noise_scheduler.alphas_cumprod[timesteps].view(-1, 1, 1, 1)
+            loss = apply_masked_loss(loss, batch, min_mask=args.minimum_masked_loss_weight,mask_weights=mask_weights)
         loss = loss.mean(dim=list(range(1, loss.ndim)))  # mean over all dims except batch
 
         loss_weights = batch["loss_weights"]  # 各sampleごとのweight

@@ -484,7 +484,7 @@ def apply_noise_offset(latents, noise, noise_offset, adaptive_noise_scale) -> to
     return noise
 
 
-def apply_masked_loss(loss, batch, min_mask=0.0) -> torch.FloatTensor:
+def apply_masked_loss(loss, batch, min_mask=0.0, mask_weights=None) -> torch.FloatTensor:
     if "conditioning_images" in batch:
         # conditioning image is -1 to 1. we need to convert it to 0 to 1
         mask_image = batch["conditioning_images"].to(dtype=loss.dtype)[:, 0].unsqueeze(1)  # use R channel
@@ -498,10 +498,18 @@ def apply_masked_loss(loss, batch, min_mask=0.0) -> torch.FloatTensor:
         return loss
 
     # resize to the same size as the loss
-    mask_image = torch.nn.functional.interpolate(mask_image, size=loss.shape[2:], mode="area")
+    mask_image = torch.nn.functional.interpolate(mask_image, size=loss.shape[2:], mode="nearest")
+    if mask_weights is not None:
+        mask_image = mask_image * mask_weights + (1 - mask_image) * (1 - mask_weights)
 
-    mask_image = torch.clamp(mask_image, min=min_mask)
+    if min_mask > 0.0:
+        mask_image = torch.clamp(mask_image, min=min_mask)
+
     loss = loss * mask_image
+    dim_range = list(range(1, loss.ndim))
+    # 마스킹으로 인한 로스 불균형 정규화
+    loss = loss.sum(dim=dim_range) / mask_image.sum(dim=dim_range)
+
     return loss
 
 
