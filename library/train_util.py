@@ -4365,9 +4365,9 @@ def add_masked_loss_arguments(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument(
-        "--bg_loss_power",
+        "--masked_bg_loss_power",
         type=float,
-        default=1.0,
+        default=None,
         help="masked_loss 를 사용할때 배경 (마스크 외)에 대한 타임스탭별 적용되는 power",
     )
 
@@ -4376,6 +4376,12 @@ def add_masked_loss_arguments(parser: argparse.ArgumentParser):
         type=float,
         default=0.0,
         help="mask weight for body region(alpha<0.2) in masked loss (default is 0) / マスク損失における顔領域のマスクの重み（デフォルトは1.0）",
+    )
+
+    parser.add_argument(
+        "--masked_random_solid_color_background",
+        action="store_true",
+        help="fill the background area (outside alpha_masks) with a random solid color in latent space / alpha_mask 외부 영역을 잠재 공간에서 랜덤한 단일 색상으로 채움",
     )
 
 
