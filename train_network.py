@@ -459,7 +459,7 @@ class NetworkTrainer:
             loss = loss * weighting
         if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
             alphas = noise_scheduler.alphas_cumprod[timesteps]
-            bg_weights = ((1-alphas)**0.5).view(-1, 1, 1, 1).to(loss.dtype)
+            bg_weights = ((1-alphas)**args.bg_loss_power).view(-1, 1, 1, 1).to(loss.dtype)
             loss = apply_masked_loss(loss, batch, min_mask=args.minimum_masked_loss_weight,bg_weights=bg_weights)
         else:
             #이미 apply_masked_loss에서 평균화 함.

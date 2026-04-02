@@ -4357,6 +4357,14 @@ def add_masked_loss_arguments(parser: argparse.ArgumentParser):
         action="store_true",
         help="apply mask for calculating loss. conditioning_data_dir is required for dataset. / 損失計算時にマスクを適用する。datasetにはconditioning_data_dirが必要",
     )
+
+    parser.add_argument(
+        "--bg_loss_power",
+        type=float,
+        default=1.0,
+        help="masked_loss 를 사용할때 배경 (마스크 외)에 대한 타임스탭별 적용되는 power",
+    )
+
     parser.add_argument(
         "--minimum_masked_loss_weight",
         type=float,
