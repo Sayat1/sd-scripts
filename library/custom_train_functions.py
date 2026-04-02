@@ -493,17 +493,20 @@ def apply_masked_loss(loss, batch, min_mask=0.0, bg_weights=None) -> torch.Float
     elif "alpha_masks" in batch and batch["alpha_masks"] is not None:
         # alpha mask is 0 to 1
         mask_image = batch["alpha_masks"].to(dtype=loss.dtype).unsqueeze(1) # add channel dimension
+        mask_image = mask_image.contiguous()
         # print(f"mask_image: {mask_image.shape}, {mask_image.mean()}")
     else:
         return loss
 
     # resize to the same size as the loss
-    mask_image = torch.nn.functional.interpolate(mask_image, size=loss.shape[2:], mode="nearest")
-    if bg_weights is not None:
-        mask_image = mask_image + (1 - mask_image) * bg_weights
+    with torch.no_grad():
+        mask_image = (mask_image > 0.5).to(mask_image.dtype)
+        mask_image = torch.nn.functional.max_pool2d(mask_image, kernel_size=8, stride=8)
+        if bg_weights is not None:
+            mask_image = mask_image + (1 - mask_image) * bg_weights
 
-    if min_mask > 0.0:
-        mask_image = torch.clamp(mask_image, min=min_mask)
+        if min_mask > 0.0:
+            mask_image = torch.clamp(mask_image, min=min_mask)
 
     loss = loss * mask_image
     dim_range = list(range(1, loss.ndim))
