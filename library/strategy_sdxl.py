@@ -132,7 +132,7 @@ class SdxlTextEncodingStrategy(TextEncodingStrategy):
         hidden_states2 = enc_out["hidden_states"][-2]  # penuultimate layer
 
         # pool2 = enc_out["text_embeds"]
-        unwrapped_text_encoder2 = unwrapped_text_encoder2 or text_encoder2
+        unwrapped_text_encoder2 = text_encoder2 if unwrapped_text_encoder2 is None else unwrapped_text_encoder2
         pool2 = self._pool_workaround(unwrapped_text_encoder2, enc_out["last_hidden_state"], input_ids2, tokenizer2.eos_token_id)
 
         # b*n, 77, 768 or 1280 -> b, n*77, 768 or 1280

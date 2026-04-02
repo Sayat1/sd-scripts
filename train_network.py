@@ -379,11 +379,11 @@ class NetworkTrainer:
         """
         with torch.no_grad():
             if "latents" in batch and batch["latents"] is not None:
-                latents = typing.cast(torch.FloatTensor, batch["latents"].to(accelerator.device))
+                latents = typing.cast(torch.FloatTensor, batch["latents"].to(accelerator.device, non_blocking=True))
             else:
                 # latentに変換
                 if args.vae_batch_size is None or len(batch["images"]) <= args.vae_batch_size:
-                    latents = self.encode_images_to_latents(args, vae, batch["images"].to(accelerator.device, dtype=vae_dtype))
+                    latents = self.encode_images_to_latents(args, vae, batch["images"].to(accelerator.device, dtype=vae_dtype, non_blocking=True))
                 else:
                     chunks = [
                         batch["images"][i : i + args.vae_batch_size] for i in range(0, len(batch["images"]), args.vae_batch_size)
@@ -391,7 +391,7 @@ class NetworkTrainer:
                     list_latents = []
                     for chunk in chunks:
                         with torch.no_grad():
-                            chunk = self.encode_images_to_latents(args, vae, chunk.to(accelerator.device, dtype=vae_dtype))
+                            chunk = self.encode_images_to_latents(args, vae, chunk.to(accelerator.device, dtype=vae_dtype, non_blocking=True))
                             list_latents.append(chunk)
                     latents = torch.cat(list_latents, dim=0)
 
@@ -793,7 +793,7 @@ class NetworkTrainer:
                 if train_text_encoder:
                     te_indices = [1]
 
-        # DataLoaderのプロセス数：0 は persistent_workers が使えないので注意
+        # DataLoader의 프로세수：0 は persistent_workers が使えないので注意
         n_workers = min(args.max_data_loader_n_workers, os.cpu_count())  # cpu_count or max_data_loader_n_workers
 
         train_dataloader = torch.utils.data.DataLoader(
@@ -803,6 +803,8 @@ class NetworkTrainer:
             collate_fn=collator,
             num_workers=n_workers,
             persistent_workers=args.persistent_data_loader_workers,
+            pin_memory=accelerator.device.type == "cuda",
+            prefetch_factor=args.prefetch_factor if n_workers > 0 else None,
         )
 
         val_dataloader = torch.utils.data.DataLoader(
@@ -812,6 +814,8 @@ class NetworkTrainer:
             collate_fn=collator,
             num_workers=n_workers,
             persistent_workers=args.persistent_data_loader_workers,
+            pin_memory=accelerator.device.type == "cuda",
+            prefetch_factor=args.prefetch_factor if n_workers > 0 else None,
         )
 
         # 学習ステップ数を計算する
