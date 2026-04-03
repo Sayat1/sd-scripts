@@ -379,13 +379,6 @@ class AugHelper:
         pass
 
     def color_aug(self, image: np.ndarray):
-        # self.color_aug_method = albu.OneOf(
-        #     [
-        #         albu.HueSaturationValue(8, 0, 0, p=0.5),
-        #         albu.RandomGamma((95, 105), p=0.5),
-        #     ],
-        #     p=0.33,
-        # )
         hue_shift_limit = 8
 
         # remove dependency to albumentations
@@ -405,6 +398,21 @@ class AugHelper:
 
         return {"image": image}
 
+    def random_color_background(self, image: np.ndarray):
+        if image.shape[2] == 4:
+            alpha = image[:, :, 3:4].astype(np.float32) / 255.0
+            if (alpha == 1.0).all():
+                logger.warning("random_color_background is applied to an image with alpha channel but all pixels are fully opaque. This should not happen.")
+                return image
+            color = np.random.randint(0, 256, (3,), dtype=np.uint8)
+            background = np.full(image[:, :, :3].shape, color, dtype=np.uint8)
+            image_rgb = image[:, :, :3]
+            image_rgb = (image_rgb.astype(np.float32) * alpha + background.astype(np.float32) * (1.0 - alpha)).astype(np.uint8)
+            image = np.concatenate([image_rgb, image[:, :, 3:4]], axis=2)
+        else:
+            logger.warning("random_color_background is applied to an image without alpha channel. This should not happen.")
+        return image
+
     def get_augmentor(self, use_color_aug: bool):  # -> Optional[Callable[[np.ndarray], Dict[str, np.ndarray]]]:
         return self.color_aug if use_color_aug else None
 
@@ -422,10 +430,11 @@ class BaseSubset:
         secondary_separator: Optional[str],
         enable_wildcard: bool,
         color_aug: bool,
+        random_color_bg: bool,
         flip_aug: bool,
         face_crop_aug_range: Optional[Tuple[float, float]],
         random_crop: bool,
-        random_crop_variations: int,
+        cache_variations: int,
         caption_dropout_rate: float,
         caption_dropout_every_n_epochs: int,
         caption_tag_dropout_rate: float,
@@ -448,10 +457,11 @@ class BaseSubset:
         self.secondary_separator = secondary_separator
         self.enable_wildcard = enable_wildcard
         self.color_aug = color_aug
+        self.random_color_bg = random_color_bg
         self.flip_aug = flip_aug
         self.face_crop_aug_range = face_crop_aug_range
         self.random_crop = random_crop
-        self.random_crop_variations = random_crop_variations
+        self.cache_variations = cache_variations
         self.caption_dropout_rate = caption_dropout_rate
         self.caption_dropout_every_n_epochs = caption_dropout_every_n_epochs
         self.caption_tag_dropout_rate = caption_tag_dropout_rate
@@ -488,10 +498,11 @@ class DreamBoothSubset(BaseSubset):
         secondary_separator,
         enable_wildcard,
         color_aug,
+        random_color_bg,
         flip_aug,
         face_crop_aug_range,
         random_crop,
-        random_crop_variations,
+        cache_variations,
         caption_dropout_rate,
         caption_dropout_every_n_epochs,
         caption_tag_dropout_rate,
@@ -517,10 +528,11 @@ class DreamBoothSubset(BaseSubset):
             secondary_separator,
             enable_wildcard,
             color_aug,
+            random_color_bg,
             flip_aug,
             face_crop_aug_range,
             random_crop,
-            random_crop_variations,
+            cache_variations,
             caption_dropout_rate,
             caption_dropout_every_n_epochs,
             caption_tag_dropout_rate,
@@ -1108,7 +1120,12 @@ class BaseDataset(torch.utils.data.Dataset):
 
     def is_latent_cacheable(self):
         return all(
-            [not subset.color_aug and (not subset.random_crop or subset.random_crop_variations > 1) for subset in self.subsets]
+            [
+                (not subset.color_aug or subset.cache_variations > 1)
+                and (not subset.random_color_bg or subset.cache_variations > 1)
+                and (not subset.random_crop or subset.cache_variations > 1)
+                for subset in self.subsets
+            ]
         )
 
     def is_text_encoder_output_cacheable(self, cache_supports_dropout: bool = False):
@@ -1139,11 +1156,13 @@ class BaseDataset(torch.utils.data.Dataset):
 
         # split by resolution and some conditions
         class Condition:
-            def __init__(self, reso, flip_aug, alpha_mask, random_crop):
+            def __init__(self, reso, flip_aug, alpha_mask, random_crop, color_aug, random_color_bg):
                 self.reso = reso
                 self.flip_aug = flip_aug
                 self.alpha_mask = alpha_mask
                 self.random_crop = random_crop
+                self.color_aug = color_aug
+                self.random_color_bg = random_color_bg
 
             def __eq__(self, other):
                 return (
@@ -1152,6 +1171,8 @@ class BaseDataset(torch.utils.data.Dataset):
                     and self.flip_aug == other.flip_aug
                     and self.alpha_mask == other.alpha_mask
                     and self.random_crop == other.random_crop
+                    and self.color_aug == other.color_aug
+                    and self.random_color_bg == other.random_color_bg
                 )
 
         batch: List[ImageInfo] = []
@@ -1167,11 +1188,20 @@ class BaseDataset(torch.utils.data.Dataset):
                 if info.image is not None and isinstance(info.image, Future):
                     info.image = info.image.result()  # future to image
             
-            # get random_crop_variations from subset
+            # get cache_variations from subset
             subset = self.image_to_subset[batch[0].image_key]
-            random_crop_variations = subset.random_crop_variations if cond.random_crop else 1
+            cache_variations = subset.cache_variations if cond.random_crop or cond.color_aug or cond.random_color_bg else 1
 
-            caching_strategy.cache_batch_latents(model, batch, cond.flip_aug, cond.alpha_mask, cond.random_crop, random_crop_variations=random_crop_variations)
+            caching_strategy.cache_batch_latents(
+                model,
+                batch,
+                cond.flip_aug,
+                cond.alpha_mask,
+                cond.random_crop,
+                cond.color_aug,
+                cond.random_color_bg,
+                cache_variations=cache_variations,
+            )
 
             # remove image from memory
             for info in batch:
@@ -1205,13 +1235,24 @@ class BaseDataset(torch.utils.data.Dataset):
                     # print(f"{process_index}/{num_processes} {i}/{len(image_infos)} {info.latents_npz}")
 
                     cache_available = caching_strategy.is_disk_cached_latents_expected(
-                        info.bucket_reso, info.latents_npz, subset.flip_aug, subset.alpha_mask, random_crop_variations=subset.random_crop_variations
+                        info.bucket_reso,
+                        info.latents_npz,
+                        subset.flip_aug,
+                        subset.alpha_mask,
+                        cache_variations=subset.cache_variations,
                     )
                     if cache_available:  # do not add to batch
                         continue
 
                 # if batch is not empty and condition is changed, flush the batch. Note that current_condition is not None if batch is not empty
-                condition = Condition(info.bucket_reso, subset.flip_aug, subset.alpha_mask, subset.random_crop)
+                condition = Condition(
+                    info.bucket_reso,
+                    subset.flip_aug,
+                    subset.alpha_mask,
+                    subset.random_crop,
+                    subset.color_aug,
+                    subset.random_color_bg,
+                )
                 if len(batch) > 0 and current_condition != condition:
                     submit_batch(batch, current_condition)
                     batch = []
@@ -1220,7 +1261,7 @@ class BaseDataset(torch.utils.data.Dataset):
 
                 if info.image is None:
                     # load image in parallel
-                    info.image = executor.submit(load_image, info.absolute_path, condition.alpha_mask)
+                    info.image = executor.submit(load_image, info.absolute_path, True)
 
                 batch.append(info)
                 current_condition = condition
@@ -1631,7 +1672,7 @@ class BaseDataset(torch.utils.data.Dataset):
 
                 image = None
             elif image_info.latents_npz is not None:  # FineTuningDatasetまたはcache_latents_to_disk=Trueの場合
-                v_idx = random.randint(0, subset.random_crop_variations - 1) if subset.random_crop_variations > 1 else None
+                v_idx = random.randint(0, subset.cache_variations - 1) if subset.cache_variations > 1 else None
                 latents, original_size, crop_ltrb, flipped_latents, alpha_mask = (
                     self.latents_caching_strategy.load_latents_from_disk(
                         image_info.latents_npz, image_info.bucket_reso, variation_index=v_idx
@@ -1688,12 +1729,15 @@ class BaseDataset(torch.utils.data.Dataset):
                             crop_ltrb = (p, 0, 0, 0)
 
                 # augmentation
-                aug = self.aug_helper.get_augmentor(subset.color_aug)
-                if aug is not None:
+                if subset.random_color_bg:
+                    img = self.aug_helper.random_color_background(img)
+
+                if subset.color_aug:
                     # augment RGB channels only
                     img_rgb = img[:, :, :3]
-                    img_rgb = aug(image=img_rgb)["image"]
+                    img_rgb = self.aug_helper.color_aug(image=img_rgb)["image"]
                     img[:, :, :3] = img_rgb
+
 
                 if flipped:
                     img = img[:, ::-1, :].copy()  # copy to avoid negative stride problem
@@ -3091,7 +3135,7 @@ def trim_and_resize_if_required(
 
 # for new_cache_latents
 def load_images_and_masks_for_caching(
-    image_infos: List[ImageInfo], use_alpha_mask: bool, random_crop: bool
+    image_infos: List[ImageInfo], use_alpha_mask: bool, random_crop: bool, color_aug: bool = False, random_color_bg: bool = False
 ) -> Tuple[torch.Tensor, List[np.ndarray], List[Tuple[int, int]], List[Tuple[int, int, int, int]]]:
     r"""
     requires image_infos to have: [absolute_path or image], bucket_reso, resized_size
@@ -3108,11 +3152,22 @@ def load_images_and_masks_for_caching(
     original_sizes: List[Tuple[int, int]] = []
     crop_ltrbs: List[Tuple[int, int, int, int]] = []
     for info in image_infos:
-        image = load_image(info.absolute_path, use_alpha_mask) if info.image is None else np.array(info.image, np.uint8)
+        image = load_image(info.absolute_path, True) if info.image is None else np.array(info.image, np.uint8)
+
+        # random color background
+        if random_color_bg:
+            image = AugHelper().random_color_background(image)
+
         # TODO 画像のメタデータが壊れていて、メタデータから割り当てたbucketと実際の画像サイズが一致しない場合があるのでチェック追加要
         image, original_size, crop_ltrb = trim_and_resize_if_required(
             random_crop, image, info.bucket_reso, info.resized_size, resize_interpolation=info.resize_interpolation
         )
+
+        # color aug
+        if color_aug:
+            img_rgb = image[:, :, :3]
+            img_rgb = AugHelper().color_aug(img_rgb)["image"]
+            image[:, :, :3] = img_rgb
 
         original_sizes.append(original_size)
         crop_ltrbs.append(crop_ltrb)
@@ -4676,6 +4731,11 @@ def add_dataset_arguments(
         "--color_aug", action="store_true", help="enable weak color augmentation / 学習時に色合いのaugmentationを有効にする"
     )
     parser.add_argument(
+        "--random_color_bg",
+        action="store_true",
+        help="enable random color background augmentation using alpha channel / 画像のアルファチャンネルを利用して無작위 단일 색상 배경을 삽입하는 augmentation을 활성화합니다.",
+    )
+    parser.add_argument(
         "--flip_aug", action="store_true", help="enable horizontal flip augmentation / 学習時に左右反転のaugmentationを有効にする"
     )
     parser.add_argument(
@@ -4690,7 +4750,7 @@ def add_dataset_arguments(
         help="enable random crop (for style training in face-centered crop augmentation) / ランダムな切り出しを有効にする（顔を中心としたaugmentationを行うときに画風の学習用に指定する）",
     )
     parser.add_argument(
-        "--random_crop_variations",
+        "--cache_variations",
         type=int,
         default=1,
         help="number of random crop variations when caching latents / latentをキャッシュするときにランダムクロップのバリエーション数を指定する",

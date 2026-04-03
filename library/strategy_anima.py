@@ -266,15 +266,29 @@ class AnimaLatentsCachingStrategy(LatentsCachingStrategy):
     def get_latents_npz_path(self, absolute_path: str, image_size: Tuple[int, int]) -> str:
         return os.path.splitext(absolute_path)[0] + f"_{image_size[0]:04d}x{image_size[1]:04d}" + self.ANIMA_LATENTS_NPZ_SUFFIX
 
-    def is_disk_cached_latents_expected(self, bucket_reso: Tuple[int, int], npz_path: str, flip_aug: bool, alpha_mask: bool, random_crop_variations: int = 1):
-        return self._default_is_disk_cached_latents_expected(8, bucket_reso, npz_path, flip_aug, alpha_mask, multi_resolution=True, random_crop_variations=random_crop_variations)
+    def is_disk_cached_latents_expected(
+        self, bucket_reso: Tuple[int, int], npz_path: str, flip_aug: bool, alpha_mask: bool, cache_variations: int = 1
+    ):
+        return self._default_is_disk_cached_latents_expected(
+            8, bucket_reso, npz_path, flip_aug, alpha_mask, multi_resolution=True, cache_variations=cache_variations
+        )
 
     def load_latents_from_disk(
         self, npz_path: str, bucket_reso: Tuple[int, int], variation_index: Optional[int] = None
     ) -> Tuple[Optional[np.ndarray], Optional[List[int]], Optional[List[int]], Optional[np.ndarray], Optional[np.ndarray]]:
         return self._default_load_latents_from_disk(8, npz_path, bucket_reso, variation_index=variation_index)
 
-    def cache_batch_latents(self, vae, image_infos: List, flip_aug: bool, alpha_mask: bool, random_crop: bool, random_crop_variations: int = 1):
+    def cache_batch_latents(
+        self,
+        vae,
+        image_infos: List,
+        flip_aug: bool,
+        alpha_mask: bool,
+        random_crop: bool,
+        color_aug: bool = False,
+        random_color_bg: bool = False,
+        cache_variations: int = 1,
+    ):
         """Cache batch of latents using Qwen Image VAE.
 
         vae is expected to be the Qwen Image VAE (AutoencoderKLQwenImage).
@@ -295,7 +309,17 @@ class AnimaLatentsCachingStrategy(LatentsCachingStrategy):
             return latents.to("cpu")
 
         self._default_cache_batch_latents(
-            encode_by_vae, vae_device, vae_dtype, image_infos, flip_aug, alpha_mask, random_crop, multi_resolution=True, random_crop_variations=random_crop_variations
+            encode_by_vae,
+            vae_device,
+            vae_dtype,
+            image_infos,
+            flip_aug,
+            alpha_mask,
+            random_crop,
+            color_aug,
+            random_color_bg,
+            multi_resolution=True,
+            cache_variations=cache_variations,
         )
 
         if not train_util.HIGH_VRAM:

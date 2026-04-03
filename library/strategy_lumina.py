@@ -308,7 +308,7 @@ class LuminaLatentsCachingStrategy(LatentsCachingStrategy):
         npz_path: str,
         flip_aug: bool,
         alpha_mask: bool,
-        random_crop_variations: int = 1,
+        cache_variations: int = 1,
     ) -> bool:
         """
         Args:
@@ -318,7 +318,13 @@ class LuminaLatentsCachingStrategy(LatentsCachingStrategy):
             alpha_mask (bool): Whether to apply
         """
         return self._default_is_disk_cached_latents_expected(
-            8, bucket_reso, npz_path, flip_aug, alpha_mask, multi_resolution=True, random_crop_variations=random_crop_variations
+            8,
+            bucket_reso,
+            npz_path,
+            flip_aug,
+            alpha_mask,
+            multi_resolution=True,
+            cache_variations=cache_variations,
         )
 
     def load_latents_from_disk(
@@ -356,7 +362,9 @@ class LuminaLatentsCachingStrategy(LatentsCachingStrategy):
         flip_aug: bool,
         alpha_mask: bool,
         random_crop: bool,
-        random_crop_variations: int = 1,
+        color_aug: bool = False,
+        random_color_bg: bool = False,
+        cache_variations: int = 1,
     ):
         encode_by_vae = lambda img_tensor: model.encode(img_tensor).to("cpu")
         vae_device = model.device
@@ -370,8 +378,10 @@ class LuminaLatentsCachingStrategy(LatentsCachingStrategy):
             flip_aug,
             alpha_mask,
             random_crop,
+            color_aug,
+            random_color_bg,
             multi_resolution=True,
-            random_crop_variations=random_crop_variations,
+            cache_variations=cache_variations,
         )
 
         if not train_util.HIGH_VRAM:

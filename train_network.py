@@ -479,7 +479,7 @@ class NetworkTrainer:
         loss = train_util.conditional_loss(noise_pred.float(), target.float(), args.loss_type, "none", huber_c)
         if weighting is not None:
             loss = loss * weighting
-        if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
+        if args.masked_loss and ("alpha_masks" in batch and batch["alpha_masks"] is not None):
             if args.masked_bg_loss_power is not None:
                 alphas = noise_scheduler.alphas_cumprod[timesteps]
                 bg_weights = ((1-alphas)**args.masked_bg_loss_power).view(-1, 1, 1, 1).to(loss.dtype)

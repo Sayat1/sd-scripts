@@ -419,11 +419,21 @@ class LatentsCachingStrategy:
         raise NotImplementedError
 
     def is_disk_cached_latents_expected(
-        self, bucket_reso: Tuple[int, int], npz_path: str, flip_aug: bool, alpha_mask: bool
+        self, bucket_reso: Tuple[int, int], npz_path: str, flip_aug: bool, alpha_mask: bool, cache_variations: int = 1
     ) -> bool:
         raise NotImplementedError
 
-    def cache_batch_latents(self, model: Any, batch: List, flip_aug: bool, alpha_mask: bool, random_crop: bool, random_crop_variations: int = 1):
+    def cache_batch_latents(
+        self,
+        model: Any,
+        batch: List,
+        flip_aug: bool,
+        alpha_mask: bool,
+        random_crop: bool,
+        color_aug: bool = False,
+        random_color_bg: bool = False,
+        cache_variations: int = 1,
+    ):
         raise NotImplementedError
 
     def _default_is_disk_cached_latents_expected(
@@ -434,7 +444,7 @@ class LatentsCachingStrategy:
         flip_aug: bool,
         apply_alpha_mask: bool,
         multi_resolution: bool = False,
-        random_crop_variations: int = 1,
+        cache_variations: int = 1,
     ) -> bool:
         """
         Args:
@@ -444,7 +454,7 @@ class LatentsCachingStrategy:
             flip_aug: whether to flip images
             apply_alpha_mask: whether to apply alpha mask
             multi_resolution: whether to use multi-resolution latents
-            random_crop_variations: number of random crop variations
+            cache_variations: number of random crop variations
 
         Returns:
             bool
@@ -464,8 +474,8 @@ class LatentsCachingStrategy:
         try:
             npz = np.load(npz_path)
 
-            for v in range(random_crop_variations):
-                v_suffix = f"_v{v}" if random_crop_variations > 1 else ""
+            for v in range(cache_variations):
+                v_suffix = f"_v{v}" if cache_variations > 1 else ""
 
                 # In old SD/SDXL npz files, if the actual latents shape does not match the expected shape, it doesn't raise an error as long as "latents" key exists (backward compatibility)
                 # In non-SD/SDXL npz files (multi-resolution support), the latents key always has the resolution suffix, and no latents key without suffix exists, so it raises an error if the expected resolution suffix key is not found (this doesn't change the behavior for non-SD/SDXL npz files).
@@ -495,8 +505,10 @@ class LatentsCachingStrategy:
         flip_aug: bool,
         apply_alpha_mask: bool,
         random_crop: bool,
+        color_aug: bool = False,
+        random_color_bg: bool = False,
         multi_resolution: bool = False,
-        random_crop_variations: int = 1,
+        cache_variations: int = 1,
     ):
         """
         Default implementation for cache_batch_latents. Image loading, VAE, flipping, alpha mask handling are common.
@@ -509,19 +521,21 @@ class LatentsCachingStrategy:
             flip_aug: whether to flip images
             apply_alpha_mask: whether to apply alpha mask
             random_crop: whether to random crop images
+            color_aug: whether to apply color augmentation
+            random_color_bg: whether to apply random color augmentation
             multi_resolution: whether to use multi-resolution latents
-            random_crop_variations: number of random crop variations
+            cache_variations: number of cache variations
 
         Returns:
             None
         """
         from library import train_util  # import here to avoid circular import
 
-        for v in range(random_crop_variations):
-            v_suffix = f"_v{v}" if random_crop_variations > 1 else ""
+        for v in range(cache_variations):
+            v_suffix = f"_v{v}" if cache_variations > 1 else ""
 
             img_tensor, alpha_masks, original_sizes, crop_ltrbs = train_util.load_images_and_masks_for_caching(
-                image_infos, apply_alpha_mask, random_crop
+                image_infos, apply_alpha_mask, random_crop, color_aug, random_color_bg
             )
             img_tensor = img_tensor.to(device=vae_device, dtype=vae_dtype)
 
@@ -557,7 +571,7 @@ class LatentsCachingStrategy:
                         key_reso_suffix + v_suffix,
                     )
                 else:
-                    if random_crop_variations > 1:
+                    if cache_variations > 1:
                         if info.latents is None:
                             info.latents = []
                             info.latents_flipped = []

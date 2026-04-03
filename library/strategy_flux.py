@@ -211,22 +211,48 @@ class FluxLatentsCachingStrategy(LatentsCachingStrategy):
             + FluxLatentsCachingStrategy.FLUX_LATENTS_NPZ_SUFFIX
         )
 
-    def is_disk_cached_latents_expected(self, bucket_reso: Tuple[int, int], npz_path: str, flip_aug: bool, alpha_mask: bool, random_crop_variations: int = 1):
-        return self._default_is_disk_cached_latents_expected(8, bucket_reso, npz_path, flip_aug, alpha_mask, multi_resolution=True, random_crop_variations=random_crop_variations)
+    def is_disk_cached_latents_expected(
+        self, bucket_reso: Tuple[int, int], npz_path: str, flip_aug: bool, alpha_mask: bool, cache_variations: int = 1
+    ):
+        return self._default_is_disk_cached_latents_expected(
+            8, bucket_reso, npz_path, flip_aug, alpha_mask, multi_resolution=True, cache_variations=cache_variations
+        )
 
     def load_latents_from_disk(
         self, npz_path: str, bucket_reso: Tuple[int, int], variation_index: Optional[int] = None
     ) -> Tuple[Optional[np.ndarray], Optional[List[int]], Optional[List[int]], Optional[np.ndarray], Optional[np.ndarray]]:
-        return self._default_load_latents_from_disk(8, npz_path, bucket_reso, variation_index=variation_index)  # support multi-resolution
+        return self._default_load_latents_from_disk(
+            8, npz_path, bucket_reso, variation_index=variation_index
+        )  # support multi-resolution
 
     # TODO remove circular dependency for ImageInfo
-    def cache_batch_latents(self, vae, image_infos: List, flip_aug: bool, alpha_mask: bool, random_crop: bool, random_crop_variations: int = 1):
+    def cache_batch_latents(
+        self,
+        vae,
+        image_infos: List,
+        flip_aug: bool,
+        alpha_mask: bool,
+        random_crop: bool,
+        color_aug: bool = False,
+        random_color_bg: bool = False,
+        cache_variations: int = 1,
+    ):
         encode_by_vae = lambda img_tensor: vae.encode(img_tensor).to("cpu")
         vae_device = vae.device
         vae_dtype = vae.dtype
 
         self._default_cache_batch_latents(
-            encode_by_vae, vae_device, vae_dtype, image_infos, flip_aug, alpha_mask, random_crop, multi_resolution=True, random_crop_variations=random_crop_variations
+            encode_by_vae,
+            vae_device,
+            vae_dtype,
+            image_infos,
+            flip_aug,
+            alpha_mask,
+            random_crop,
+            color_aug,
+            random_color_bg,
+            multi_resolution=True,
+            cache_variations=cache_variations,
         )
 
         if not train_util.HIGH_VRAM:

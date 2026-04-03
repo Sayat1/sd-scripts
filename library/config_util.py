@@ -62,10 +62,11 @@ class BaseSubsetParams:
     secondary_separator: Optional[str] = None
     enable_wildcard: bool = False
     color_aug: bool = False
+    random_color_bg: bool = False
     flip_aug: bool = False
     face_crop_aug_range: Optional[Tuple[float, float]] = None
     random_crop: bool = False
-    random_crop_variations: int = 1
+    cache_variations: int = 1
     caption_prefix: Optional[str] = None
     caption_suffix: Optional[str] = None
     caption_dropout_rate: float = 0.0
@@ -184,11 +185,12 @@ class ConfigSanitizer:
     # subset schema
     SUBSET_ASCENDABLE_SCHEMA = {
         "color_aug": bool,
+        "random_color_bg": bool,
         "face_crop_aug_range": functools.partial(__validate_and_convert_twodim.__func__, float),
         "flip_aug": bool,
         "num_repeats": int,
         "random_crop": bool,
-        "random_crop_variations": int,
+        "cache_variations": int,
         "shuffle_caption": bool,
         "keep_tokens": int,
         "keep_tokens_separator": str,
@@ -562,10 +564,11 @@ def generate_dataset_group_by_blueprint(dataset_group_blueprint: DatasetGroupBlu
                     caption_prefix: {subset.caption_prefix}
                     caption_suffix: {subset.caption_suffix}
                     color_aug: {subset.color_aug}
+                    random_color_bg: {subset.random_color_bg}
                     flip_aug: {subset.flip_aug}
                     face_crop_aug_range: {subset.face_crop_aug_range}
                     random_crop: {subset.random_crop}
-                    random_crop_variations: {subset.random_crop_variations}
+                    cache_variations: {subset.cache_variations}
                     token_warmup_min: {subset.token_warmup_min},
                     token_warmup_step: {subset.token_warmup_step},
                     alpha_mask: {subset.alpha_mask}
