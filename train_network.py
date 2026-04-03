@@ -262,24 +262,24 @@ class NetworkTrainer:
         # 배경을 랜덤 색상의 잠재값으로 채우기 및 마스크 재사용 준비
         if args.masked_random_solid_color_background and "alpha_masks" in batch and batch["alpha_masks"] is not None:
             import torch.nn.functional as F
-
-            # latent resolution mask 생성 및 저장 (재사용을 위함)
-            masks = batch["alpha_masks"].to(latents.device, dtype=latents.dtype)
-            if len(masks.shape) == 3:
-                masks = masks.unsqueeze(1)  # B, 1, H, W
-
-            # 잠재 공간 크기에 맞춰 마스크 리사이즈 (H/8, W/8)
-            # apply_masked_loss에서의 로직과 유사하게 0.5 기준으로 이진화 후 리사이즈
             with torch.no_grad():
-                latent_masks = F.interpolate(latent_masks, size=(latents.shape[2], latents.shape[3]), mode="bilinear", align_corners=False)
+                # latent resolution mask 생성 및 저장 (재사용을 위함)
+                masks = batch["alpha_masks"].to(latents.device, dtype=latents.dtype)
+                if len(masks.shape) == 3:
+                    masks = masks.unsqueeze(1)  # B, 1, H, W
+
+                # 잠재 공간 크기에 맞춰 마스크 리사이즈 (H/8, W/8)
+                # apply_masked_loss에서의 로직과 유사하게 0.5 기준으로 이진화 후 리사이즈
+            
+                latent_masks = F.interpolate(masks, size=(latents.shape[2], latents.shape[3]), mode="bilinear", align_corners=False)
                 batch["latent_alpha_masks"] = latent_masks  # apply_masked_loss에서 재사용 가능하도록 저장
 
                 # 각 배치 샘플마다 고유한 랜덤 잠재 배경색 생성 (공간적으로 동일한 단일색 효과)
                 # SD VAE의 잠재 공간 분포(평균 0, 표준편차 1 수준)를 고려하여 랜덤값 생성
                 bg_latents = torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=latents.device, dtype=latents.dtype)
 
-            # 마스크 적용: 마스크 영역은 원본, 배경 영역(1-mask)은 랜덤 단일색 잠재값
-            latents = latents * latent_masks + bg_latents * (1.0 - latent_masks)
+                # 마스크 적용: 마스크 영역은 원본, 배경 영역(1-mask)은 랜덤 단일색 잠재값
+                latents = latents * latent_masks + bg_latents * (1.0 - latent_masks)
 
         # Sample noise, sample a random timestep for each image, and add noise to the latents,
         # with noise offset and/or multires noise if specified
