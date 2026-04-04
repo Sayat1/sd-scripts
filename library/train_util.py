@@ -399,12 +399,42 @@ class AugHelper:
         return {"image": image}
 
     def random_color_background(self, image: np.ndarray):
+        def get_random_background_color():
+            import colorsys
+            """
+            다음 케이스를 혼합하여 샘플링:
+            - 무채색 (흰색/회색/검정): 30%
+            - 중간 채도 컬러: 55%
+            - 고채도 컬러: 15%
+            """
+            roll = np.random.random()
+
+            if roll < 0.35:
+                # 무채색: 흰~회~검 (채도 0, 명도만 랜덤)
+                v = np.random.random()
+                r, g, b = v, v, v
+            elif roll < 0.9:
+                # 중간 채도: 파스텔~어두운 중간톤
+                h = np.random.random()               # 색상 전체 범위
+                s = np.random.uniform(0.2, 0.7)     # 중간 채도
+                v = np.random.uniform(0.2, 0.9)     # 중간 명도
+                r, g, b = colorsys.hsv_to_rgb(h, s, v)
+            else:
+                # 고채도: 선명한 원색 계열
+                h = np.random.random()
+                s = np.random.uniform(0.7, 1.0)
+                v = np.random.uniform(0.5, 1.0)
+                r, g, b = colorsys.hsv_to_rgb(h, s, v)
+
+            color = np.array([r * 255, g * 255, b * 255], dtype=np.uint8)
+            return color
+
         if image.shape[2] == 4:
             alpha = image[:, :, 3:4].astype(np.float32) / 255.0
             if (alpha == 1.0).all():
                 logger.warning("random_color_background is applied to an image with alpha channel but all pixels are fully opaque. This should not happen.")
                 return image
-            color = np.random.randint(0, 256, (3,), dtype=np.uint8)
+            color = get_random_background_color()
             background = np.full(image[:, :, :3].shape, color, dtype=np.uint8)
             image_rgb = image[:, :, :3]
             image_rgb = (image_rgb.astype(np.float32) * alpha + background.astype(np.float32) * (1.0 - alpha)).astype(np.uint8)
