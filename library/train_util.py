@@ -261,8 +261,11 @@ class BucketManager:
         self.buckets = sorted_buckets
         self.reso_to_id = sorted_reso_to_id
 
-    def make_buckets(self):
-        resos = model_util.make_bucket_resolutions(self.max_reso, self.min_size, self.max_size, self.reso_steps)
+    def make_buckets(self, specific_resos: Optional[List[Tuple[int, int]]] = None):
+        if specific_resos:
+            resos = specific_resos
+        else:
+            resos = model_util.make_bucket_resolutions(self.max_reso, self.min_size, self.max_size, self.reso_steps)
         self.set_predefined_resos(resos)
 
     def set_predefined_resos(self, resos):
@@ -472,6 +475,7 @@ class BaseSubset:
         caption_suffix: Optional[str],
         token_warmup_min: int,
         token_warmup_step: Union[float, int],
+        specific_buckets: Optional[List[str]] = None,
         custom_attributes: Optional[Dict[str, Any]] = None,
         validation_seed: Optional[int] = None,
         validation_split: Optional[float] = 0.0,
@@ -492,6 +496,7 @@ class BaseSubset:
         self.face_crop_aug_range = face_crop_aug_range
         self.random_crop = random_crop
         self.cache_variations = cache_variations
+        self.specific_buckets = specific_buckets
         self.caption_dropout_rate = caption_dropout_rate
         self.caption_dropout_every_n_epochs = caption_dropout_every_n_epochs
         self.caption_tag_dropout_rate = caption_tag_dropout_rate
@@ -540,6 +545,7 @@ class DreamBoothSubset(BaseSubset):
         caption_suffix,
         token_warmup_min,
         token_warmup_step,
+        specific_buckets: Optional[List[str]] = None,
         custom_attributes: Optional[Dict[str, Any]] = None,
         validation_seed: Optional[int] = None,
         validation_split: Optional[float] = 0.0,
@@ -570,6 +576,7 @@ class DreamBoothSubset(BaseSubset):
             caption_suffix,
             token_warmup_min,
             token_warmup_step,
+            specific_buckets=specific_buckets,
             custom_attributes=custom_attributes,
             validation_seed=validation_seed,
             validation_split=validation_split,
@@ -603,9 +610,11 @@ class FineTuningSubset(BaseSubset):
         secondary_separator,
         enable_wildcard,
         color_aug,
+        random_color_bg,
         flip_aug,
         face_crop_aug_range,
         random_crop,
+        cache_variations,
         caption_dropout_rate,
         caption_dropout_every_n_epochs,
         caption_tag_dropout_rate,
@@ -613,6 +622,7 @@ class FineTuningSubset(BaseSubset):
         caption_suffix,
         token_warmup_min,
         token_warmup_step,
+        specific_buckets: Optional[List[str]] = None,
         custom_attributes: Optional[Dict[str, Any]] = None,
         validation_seed: Optional[int] = None,
         validation_split: Optional[float] = 0.0,
@@ -631,9 +641,11 @@ class FineTuningSubset(BaseSubset):
             secondary_separator,
             enable_wildcard,
             color_aug,
+            random_color_bg,
             flip_aug,
             face_crop_aug_range,
             random_crop,
+            cache_variations,
             caption_dropout_rate,
             caption_dropout_every_n_epochs,
             caption_tag_dropout_rate,
@@ -641,6 +653,7 @@ class FineTuningSubset(BaseSubset):
             caption_suffix,
             token_warmup_min,
             token_warmup_step,
+            specific_buckets=specific_buckets,
             custom_attributes=custom_attributes,
             validation_seed=validation_seed,
             validation_split=validation_split,
@@ -670,9 +683,11 @@ class ControlNetSubset(BaseSubset):
         secondary_separator,
         enable_wildcard,
         color_aug,
+        random_color_bg,
         flip_aug,
         face_crop_aug_range,
         random_crop,
+        cache_variations,
         caption_dropout_rate,
         caption_dropout_every_n_epochs,
         caption_tag_dropout_rate,
@@ -680,6 +695,7 @@ class ControlNetSubset(BaseSubset):
         caption_suffix,
         token_warmup_min,
         token_warmup_step,
+        specific_buckets: Optional[List[str]] = None,
         custom_attributes: Optional[Dict[str, Any]] = None,
         validation_seed: Optional[int] = None,
         validation_split: Optional[float] = 0.0,
@@ -698,9 +714,11 @@ class ControlNetSubset(BaseSubset):
             secondary_separator,
             enable_wildcard,
             color_aug,
+            random_color_bg,
             flip_aug,
             face_crop_aug_range,
             random_crop,
+            cache_variations,
             caption_dropout_rate,
             caption_dropout_every_n_epochs,
             caption_tag_dropout_rate,
@@ -708,6 +726,7 @@ class ControlNetSubset(BaseSubset):
             caption_suffix,
             token_warmup_min,
             token_warmup_step,
+            specific_buckets=specific_buckets,
             custom_attributes=custom_attributes,
             validation_seed=validation_seed,
             validation_split=validation_split,
@@ -1079,7 +1098,23 @@ class BaseDataset(torch.utils.data.Dataset):
                     self.bucket_reso_steps,
                 )
                 if not self.bucket_no_upscale:
-                    self.bucket_manager.make_buckets()
+                    # check if any subset has specific_buckets
+                    specific_resos = []
+                    for subset in self.subsets:
+                        if hasattr(subset, "specific_buckets") and subset.specific_buckets:
+                            for sb in subset.specific_buckets:
+                                if "x" in sb:
+                                    try:
+                                        w, h = map(int, sb.split("x"))
+                                        if (w, h) not in specific_resos:
+                                            specific_resos.append((w, h))
+                                    except ValueError:
+                                        logger.warning(f"ignore illegal specific bucket resolution: {sb}")
+
+                    if specific_resos:
+                        self.bucket_manager.make_buckets(specific_resos=specific_resos)
+                    else:
+                        self.bucket_manager.make_buckets()
                 else:
                     logger.warning(
                         "min_bucket_reso and max_bucket_reso are ignored if bucket_no_upscale is set, because bucket reso is defined by image size automatically / bucket_no_upscaleが指定された場合は、bucketの解像度は画像サイズから自動計算されるため、min_bucket_resoとmax_bucket_resoは無視されます"

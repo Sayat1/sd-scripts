@@ -74,6 +74,7 @@ class BaseSubsetParams:
     caption_tag_dropout_rate: float = 0.0
     token_warmup_min: int = 1
     token_warmup_step: float = 0
+    specific_buckets: Optional[List[str]] = None
     custom_attributes: Optional[Dict[str, Any]] = None
     validation_seed: int = 0
     validation_split: float = 0.0
@@ -191,6 +192,7 @@ class ConfigSanitizer:
         "num_repeats": int,
         "random_crop": bool,
         "cache_variations": int,
+        "specific_buckets": [str],
         "shuffle_caption": bool,
         "keep_tokens": int,
         "keep_tokens_separator": str,

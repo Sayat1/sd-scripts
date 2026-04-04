@@ -23,7 +23,7 @@ image = (
             "pkg-config"
         )
         .run_commands(
-            "echo rebuild-20",
+            "echo rebuild-25",
             "pip config set global.extra-index-url https://download.pytorch.org/whl/nightly/cu132",
             "pip install --upgrade pip",
             "cd /root && git clone -b 'main' https://github.com/Sayat1/sd-scripts",
