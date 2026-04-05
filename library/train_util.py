@@ -4491,7 +4491,13 @@ def add_masked_loss_arguments(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument(
-        "--masked_bg_loss_power",
+        "--masked_loss_by_timestep_power", 
+        type=float, default=None, 
+        help="timestep에 따라, 노이즈가 낮을수록 마스킹될 확률이 높아지고, 높을수록 낮아짐. 이 수치가 높을수록 마스킹되는 확률 기준선이 올라감. 1.0 에는 타임스탭 500기준."
+    )
+
+    parser.add_argument(
+        "--masked_loss_bg_power",
         type=float,
         default=None,
         help="masked_loss 를 사용할때 배경 (마스크 외)에 대한 타임스탭별 적용되는 power",

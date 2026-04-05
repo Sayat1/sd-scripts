@@ -263,6 +263,7 @@ class NetworkTrainer:
         # with noise offset and/or multires noise if specified
         noise, noisy_latents, timesteps = train_util.get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents)
 
+        #Tlora 관련 타임스탭 마스크 계산 및 업데이트
         if args.network_args is not None and "tlora" in args.network_args :
             from lycoris.modules.tlora import set_timestep_mask
             timestep_masks = train_util.compute_timestep_mask(timesteps, 1000, network.lora_dim)
@@ -463,15 +464,28 @@ class NetworkTrainer:
         loss = train_util.conditional_loss(noise_pred.float(), target.float(), args.loss_type, "none", huber_c)
         if weighting is not None:
             loss = loss * weighting
-        if args.masked_loss and (args.masked_loss_mask_dropout==0.0 or random.random()>=args.masked_loss_mask_dropout) and ("alpha_masks" in batch and batch["alpha_masks"] is not None):
-            if args.masked_bg_loss_power is not None:
-                alphas = noise_scheduler.alphas_cumprod[timesteps]
-                bg_weights = ((1-alphas)**args.masked_bg_loss_power).view(-1, 1, 1, 1).to(loss.dtype)
-            else:
-                bg_weights = None
-            loss = apply_masked_loss(loss, batch, min_mask=args.minimum_masked_loss_weight,bg_weights=bg_weights)
-        else:
-            #이미 apply_masked_loss에서 평균화 함.
+
+        masking_loss = False
+        if args.masked_loss and ("alpha_masks" in batch and batch["alpha_masks"] is not None):
+            masking_loss = True
+            if args.masked_loss_mask_dropout!=0.0 and random.random() < args.masked_loss_mask_dropout:
+                masking_loss = False
+            if masking_loss:
+                if args.masked_loss_bg_power is not None:
+                    #alphas = 타임스탭 높을수록 노이즈 높아져 마스킹 낮게 설정.
+                    alphas = noise_scheduler.alphas_cumprod[timesteps]
+                    bg_weights = ((1-alphas)**args.masked_loss_bg_power).view(-1, 1, 1, 1).to(loss.dtype)
+                elif args.masked_loss_by_timestep_power is not None:
+                    #타임스탭에 따라, 마스킹 세기가 아닌 되고/안되는 확률로 결정 (0 or 1).
+                    alphas = noise_scheduler.alphas_cumprod[timesteps]
+                    bg_weights = (((1-alphas)**args.masked_loss_by_timestep_power)>random.random()).float().view(-1, 1, 1, 1)
+                else:
+                    bg_weights = None
+                #bg_weights 1에 근접 = 배경 강해짐 (마스킹 무효화) , 0에 근접 = 배경 약해짐 (마스킹 걍화)
+                loss = apply_masked_loss(loss, batch, min_mask=args.minimum_masked_loss_weight,bg_weights=bg_weights)
+
+        if not masking_loss:
+            #masked loss는 이미 apply_masked_loss에서 평균화 함.
             loss = loss.mean(dim=list(range(1, loss.ndim)))  # mean over all dims except batch
 
         loss_weights = batch["loss_weights"]  # 各sampleごとのweight
