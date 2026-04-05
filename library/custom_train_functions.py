@@ -485,11 +485,7 @@ def apply_noise_offset(latents, noise, noise_offset, adaptive_noise_scale) -> to
 
 
 def apply_masked_loss(loss, batch, min_mask=0.0, bg_weights=None) -> torch.FloatTensor:
-    if "latent_alpha_masks" in batch and batch["latent_alpha_masks"] is not None:
-        mask_image = batch["latent_alpha_masks"].to(dtype=loss.dtype)
-        if mask_image.ndim == 3:
-            mask_image = mask_image.unsqueeze(1)
-    elif "conditioning_images" in batch:
+    if "conditioning_images" in batch:
         # conditioning image is -1 to 1. we need to convert it to 0 to 1
         mask_image = batch["conditioning_images"].to(dtype=loss.dtype)[:, 0].unsqueeze(1)  # use R channel
         mask_image = mask_image / 2 + 0.5
@@ -503,11 +499,9 @@ def apply_masked_loss(loss, batch, min_mask=0.0, bg_weights=None) -> torch.Float
         return loss
 
     # resize to the same size as the loss if not already resized
-    if "latent_alpha_masks" not in batch or batch["latent_alpha_masks"] is None:
-        with torch.no_grad():
-            mask_image = torch.nn.functional.interpolate(mask_image, size=loss.shape[2:], mode="bilinear", align_corners=False)
-    
     with torch.no_grad():
+        mask_image = torch.nn.functional.interpolate(mask_image, size=loss.shape[2:], mode="bilinear", align_corners=False)
+    
         if bg_weights is not None:
             mask_image = mask_image + (1 - mask_image) * bg_weights
 
