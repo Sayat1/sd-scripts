@@ -4485,6 +4485,12 @@ def add_masked_loss_arguments(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument(
+        "--masked_loss_mask_dropout", 
+        type=float, default=0.0, 
+        help="Rate of Mask dropout chance(0.0~1.0)"
+    )
+
+    parser.add_argument(
         "--masked_bg_loss_power",
         type=float,
         default=None,
@@ -4497,13 +4503,6 @@ def add_masked_loss_arguments(parser: argparse.ArgumentParser):
         default=0.0,
         help="mask weight for body region(alpha<0.2) in masked loss (default is 0) / マスク損失における顔領域のマスクの重み（デフォルトは1.0）",
     )
-
-    parser.add_argument(
-        "--masked_random_solid_color_background",
-        action="store_true",
-        help="fill the background area (outside alpha_masks) with a random solid color in latent space / alpha_mask 외부 영역을 잠재 공간에서 랜덤한 단일 색상으로 채움",
-    )
-
 
 def add_dit_training_arguments(parser: argparse.ArgumentParser):
     # Text encoder related arguments
