@@ -285,6 +285,12 @@ class NetworkTrainer:
         # with noise offset and/or multires noise if specified
         noise, noisy_latents, timesteps = train_util.get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents)
 
+        if args.network_args is not None and "tlora" in args.network_args :
+            from lycoris.modules.tlora import set_timestep_mask
+            timestep_masks = train_util.compute_timestep_mask(timesteps, 1000, network.lora_dim)
+            set_timestep_mask(timestep_masks)
+
+
         # ensure the hidden state will require grad
         #꺼도 작동하고, 키면 느려짐 (20%정도)
         # if args.gradient_checkpointing:

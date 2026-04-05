@@ -6380,6 +6380,38 @@ def get_timesteps(min_timestep: int, max_timestep: int, b_size: int, device: tor
     timesteps = timesteps.long().to(device)
     return timesteps
 
+def compute_timestep_mask(
+    timestep: torch.Tensor,  # shape [B, 1]
+    max_timestep: int,
+    max_rank: int,
+    min_rank: int = 1,
+    alpha: float = 1.0,
+) -> torch.Tensor:
+    """
+    Compute a binary rank mask based on timestep (batched version).
+
+    At high noise (high timestep): fewer ranks active (structure-level adaptation)
+    At low noise (low timestep): more ranks active (detail-level adaptation)
+
+    Args:
+        timestep: Current denoising timesteps, shape [B, 1]
+        max_timestep: Maximum timestep (e.g., 1000)
+        max_rank: Maximum rank (all ranks active at t=0)
+        min_rank: Minimum rank (active even at t=max_timestep)
+        alpha: Scaling exponent (1.0 = linear, >1 = more aggressive at high noise)
+
+    Returns:
+        Binary mask of shape [B, max_rank]
+    """
+    # timestep: [B, 1] -> r: [B, 1]
+    r = (((max_timestep - timestep.float()) / max_timestep) ** alpha * (max_rank - min_rank)).int() + min_rank
+    r = r.clamp(max=max_rank)  # [B, 1]
+
+    # indices: [1, max_rank], r: [B, 1] -> broadcast -> [B, max_rank]
+    indices = torch.arange(max_rank, device=timestep.device).unsqueeze(0)  # [1, max_rank]
+    mask = (indices < r).float()  # [B, max_rank]
+
+    return mask
 
 def get_noise_noisy_latents_and_timesteps(
     args, noise_scheduler, latents: torch.FloatTensor
