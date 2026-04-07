@@ -5607,9 +5607,9 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
             int(args.text_encoder_start_step * num_training_steps) if isinstance(args.text_encoder_start_step, float) else args.text_encoder_start_step
             )
 
-    # if schedulefree optimizer, return dummy scheduler after some args are set
-    if is_schedulefree_optimizer(optimizer, args):
-        return get_dummy_scheduler(optimizer)
+    # # if schedulefree optimizer, return dummy scheduler after some args are set
+    # if is_schedulefree_optimizer(optimizer, args):
+    #     return get_dummy_scheduler(optimizer)
 
     lr_scheduler_kwargs = {}  # get custom lr_scheduler kwargs
     if args.lr_scheduler_args is not None and len(args.lr_scheduler_args) > 0:
