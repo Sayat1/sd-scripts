@@ -272,7 +272,7 @@ class Sd3TextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
     def get_outputs_npz_path(self, image_abs_path: str) -> str:
         return os.path.splitext(image_abs_path)[0] + Sd3TextEncoderOutputsCachingStrategy.SD3_TEXT_ENCODER_OUTPUTS_NPZ_SUFFIX
 
-    def is_disk_cached_outputs_expected(self, npz_path: str):
+    def is_disk_cached_outputs_expected(self, npz_path: str, text_encoder_cache_variations: int = 1):
         if not self.cache_to_disk:
             return False
         if not os.path.exists(npz_path):
@@ -282,17 +282,20 @@ class Sd3TextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
 
         try:
             npz = np.load(npz_path)
-            if "lg_out" not in npz:
-                return False
-            if "lg_pooled" not in npz:
-                return False
-            if "clip_l_attn_mask" not in npz or "clip_g_attn_mask" not in npz:  # necessary even if not used
-                return False
+            for v in range(text_encoder_cache_variations):
+                v_suffix = f"_v{v}" if text_encoder_cache_variations > 1 else ""
+                if "lg_out" + v_suffix not in npz:
+                    return False
+                if "lg_pooled" + v_suffix not in npz:
+                    return False
+                if "clip_l_attn_mask" + v_suffix not in npz or "clip_g_attn_mask" + v_suffix not in npz:
+                    return False
+                if "t5_out" + v_suffix not in npz:
+                    return False
+                if "t5_attn_mask" + v_suffix not in npz:
+                    return False
+
             if "apply_lg_attn_mask" not in npz:
-                return False
-            if "t5_out" not in npz:
-                return False
-            if "t5_attn_mask" not in npz:
                 return False
             npz_apply_lg_attn_mask = npz["apply_lg_attn_mask"]
             if npz_apply_lg_attn_mask != self.apply_lg_attn_mask:
@@ -308,21 +311,28 @@ class Sd3TextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
 
         return True
 
-    def load_outputs_npz(self, npz_path: str) -> List[np.ndarray]:
+    def load_outputs_npz(self, npz_path: str, variation_index: Optional[int] = None) -> List[np.ndarray]:
+        v_suffix = f"_v{variation_index}" if variation_index is not None else ""
         data = np.load(npz_path)
-        lg_out = data["lg_out"]
-        lg_pooled = data["lg_pooled"]
-        t5_out = data["t5_out"]
+        lg_out = data["lg_out" + v_suffix]
+        lg_pooled = data["lg_pooled" + v_suffix]
+        t5_out = data["t5_out" + v_suffix]
 
-        l_attn_mask = data["clip_l_attn_mask"]
-        g_attn_mask = data["clip_g_attn_mask"]
-        t5_attn_mask = data["t5_attn_mask"]
+        l_attn_mask = data["clip_l_attn_mask" + v_suffix]
+        g_attn_mask = data["clip_g_attn_mask" + v_suffix]
+        t5_attn_mask = data["t5_attn_mask" + v_suffix]
 
         # apply_t5_attn_mask and apply_lg_attn_mask are same as self.apply_t5_attn_mask and self.apply_lg_attn_mask
         return [lg_out, t5_out, lg_pooled, l_attn_mask, g_attn_mask, t5_attn_mask]
 
     def cache_batch_outputs(
-        self, tokenize_strategy: TokenizeStrategy, models: List[Any], text_encoding_strategy: TextEncodingStrategy, infos: List
+        self,
+        tokenize_strategy: TokenizeStrategy,
+        models: List[Any],
+        text_encoding_strategy: TextEncodingStrategy,
+        infos: List,
+        text_encoder_cache_variations: int = 1,
+        variation_index: int = 0,
     ):
         sd3_text_encoding_strategy: Sd3TextEncodingStrategy = text_encoding_strategy
         captions = [info.caption for info in infos]
@@ -354,6 +364,8 @@ class Sd3TextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
         g_attn_mask = tokens_and_masks[4].cpu().numpy()
         t5_attn_mask = tokens_and_masks[5].cpu().numpy()
 
+        v_suffix = f"_v{variation_index}" if text_encoder_cache_variations > 1 else ""
+
         for i, info in enumerate(infos):
             lg_out_i = lg_out[i]
             t5_out_i = t5_out[i]
@@ -365,20 +377,28 @@ class Sd3TextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
             apply_t5_attn_mask = self.apply_t5_attn_mask
 
             if self.cache_to_disk:
-                np.savez(
-                    info.text_encoder_outputs_npz,
-                    lg_out=lg_out_i,
-                    lg_pooled=lg_pooled_i,
-                    t5_out=t5_out_i,
-                    clip_l_attn_mask=l_attn_mask_i,
-                    clip_g_attn_mask=g_attn_mask_i,
-                    t5_attn_mask=t5_attn_mask_i,
-                    apply_lg_attn_mask=apply_lg_attn_mask,
-                    apply_t5_attn_mask=apply_t5_attn_mask,
-                )
+                kwargs = {}
+                if variation_index > 0 and os.path.exists(info.text_encoder_outputs_npz):
+                    with np.load(info.text_encoder_outputs_npz) as npz:
+                        kwargs = dict(npz)
+
+                kwargs["lg_out" + v_suffix] = lg_out_i
+                kwargs["lg_pooled" + v_suffix] = lg_pooled_i
+                kwargs["t5_out" + v_suffix] = t5_out_i
+                kwargs["clip_l_attn_mask" + v_suffix] = l_attn_mask_i
+                kwargs["clip_g_attn_mask" + v_suffix] = g_attn_mask_i
+                kwargs["t5_attn_mask" + v_suffix] = t5_attn_mask_i
+                kwargs["apply_lg_attn_mask"] = apply_lg_attn_mask
+                kwargs["apply_t5_attn_mask"] = apply_t5_attn_mask
+                np.savez(info.text_encoder_outputs_npz, **kwargs)
             else:
-                # it's fine that attn mask is not None. it's overwritten before calling the model if necessary
-                info.text_encoder_outputs = (lg_out_i, t5_out_i, lg_pooled_i, l_attn_mask_i, g_attn_mask_i, t5_attn_mask_i)
+                if text_encoder_cache_variations > 1:
+                    if variation_index == 0:
+                        info.text_encoder_outputs = []
+                    info.text_encoder_outputs.append((lg_out_i, t5_out_i, lg_pooled_i, l_attn_mask_i, g_attn_mask_i, t5_attn_mask_i))
+                else:
+                    # it's fine that attn mask is not None. it's overwritten before calling the model if necessary
+                    info.text_encoder_outputs = (lg_out_i, t5_out_i, lg_pooled_i, l_attn_mask_i, g_attn_mask_i, t5_attn_mask_i)
 
 
 class Sd3LatentsCachingStrategy(LatentsCachingStrategy):

@@ -235,7 +235,7 @@ class SdxlTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
     def get_outputs_npz_path(self, image_abs_path: str) -> str:
         return os.path.splitext(image_abs_path)[0] + SdxlTextEncoderOutputsCachingStrategy.SDXL_TEXT_ENCODER_OUTPUTS_NPZ_SUFFIX
 
-    def is_disk_cached_outputs_expected(self, npz_path: str):
+    def is_disk_cached_outputs_expected(self, npz_path: str, text_encoder_cache_variations: int = 1):
         if not self.cache_to_disk:
             return False
         if not os.path.exists(npz_path):
@@ -245,27 +245,40 @@ class SdxlTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
 
         try:
             npz = np.load(npz_path)
-            if "hidden_state1" not in npz or "hidden_state2" not in npz or "pool2" not in npz:
-                return False
+            for v in range(text_encoder_cache_variations):
+                v_suffix = f"_v{v}" if text_encoder_cache_variations > 1 else ""
+                if (
+                    "hidden_state1" + v_suffix not in npz
+                    or "hidden_state2" + v_suffix not in npz
+                    or "pool2" + v_suffix not in npz
+                ):
+                    return False
         except Exception as e:
             logger.error(f"Error loading file: {npz_path}")
             raise e
 
         return True
 
-    def load_outputs_npz(self, npz_path: str) -> List[np.ndarray]:
+    def load_outputs_npz(self, npz_path: str, variation_index: Optional[int] = None) -> List[np.ndarray]:
+        v_suffix = f"_v{variation_index}" if variation_index is not None else ""
         data = np.load(npz_path)
-        hidden_state1 = data["hidden_state1"]
-        hidden_state2 = data["hidden_state2"]
-        pool2 = data["pool2"]
+        hidden_state1 = data["hidden_state1" + v_suffix]
+        hidden_state2 = data["hidden_state2" + v_suffix]
+        pool2 = data["pool2" + v_suffix]
         return [hidden_state1, hidden_state2, pool2]
 
     def cache_batch_outputs(
-        self, tokenize_strategy: TokenizeStrategy, models: List[Any], text_encoding_strategy: TextEncodingStrategy, infos: List
+        self,
+        tokenize_strategy: TokenizeStrategy,
+        models: List[Any],
+        text_encoding_strategy: TextEncodingStrategy,
+        infos: List,
+        text_encoder_cache_variations: int = 1,
+        variation_index: int = 0,
     ):
         sdxl_text_encoding_strategy = text_encoding_strategy  # type: SdxlTextEncodingStrategy
         captions = [info.caption for info in infos]
-
+        print(captions)
         if self.is_weighted:
             tokens_list, weights_list = tokenize_strategy.tokenize_with_weights(captions)
             with torch.no_grad():
@@ -290,17 +303,27 @@ class SdxlTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
         hidden_state2 = hidden_state2.cpu().numpy()
         pool2 = pool2.cpu().numpy()
 
+        v_suffix = f"_v{variation_index}" if text_encoder_cache_variations > 1 else ""
+
         for i, info in enumerate(infos):
             hidden_state1_i = hidden_state1[i]
             hidden_state2_i = hidden_state2[i]
             pool2_i = pool2[i]
 
             if self.cache_to_disk:
-                np.savez(
-                    info.text_encoder_outputs_npz,
-                    hidden_state1=hidden_state1_i,
-                    hidden_state2=hidden_state2_i,
-                    pool2=pool2_i,
-                )
+                kwargs = {}
+                if variation_index > 0 and os.path.exists(info.text_encoder_outputs_npz):
+                    with np.load(info.text_encoder_outputs_npz) as npz:
+                        kwargs = dict(npz)
+
+                kwargs["hidden_state1" + v_suffix] = hidden_state1_i
+                kwargs["hidden_state2" + v_suffix] = hidden_state2_i
+                kwargs["pool2" + v_suffix] = pool2_i
+                np.savez(info.text_encoder_outputs_npz, **kwargs)
             else:
-                info.text_encoder_outputs = [hidden_state1_i, hidden_state2_i, pool2_i]
+                if text_encoder_cache_variations > 1:
+                    if variation_index == 0:
+                        info.text_encoder_outputs = []
+                    info.text_encoder_outputs.append([hidden_state1_i, hidden_state2_i, pool2_i])
+                else:
+                    info.text_encoder_outputs = [hidden_state1_i, hidden_state2_i, pool2_i]

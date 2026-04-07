@@ -167,10 +167,11 @@ class LuminaTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy)
             + LuminaTextEncoderOutputsCachingStrategy.LUMINA_TEXT_ENCODER_OUTPUTS_NPZ_SUFFIX
         )
 
-    def is_disk_cached_outputs_expected(self, npz_path: str) -> bool:
+    def is_disk_cached_outputs_expected(self, npz_path: str, text_encoder_cache_variations: int = 1) -> bool:
         """
         Args:
             npz_path (str): Path to the npz file.
+            text_encoder_cache_variations (int): Number of variations.
 
         Returns:
             bool: True if the npz file is expected to be cached.
@@ -184,29 +185,32 @@ class LuminaTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy)
 
         try:
             npz = np.load(npz_path)
-            if "hidden_state" not in npz:
-                return False
-            if "attention_mask" not in npz:
-                return False
-            if "input_ids" not in npz:
-                return False
+            for v in range(text_encoder_cache_variations):
+                v_suffix = f"_v{v}" if text_encoder_cache_variations > 1 else ""
+                if "hidden_state" + v_suffix not in npz:
+                    return False
+                if "attention_mask" + v_suffix not in npz:
+                    return False
+                if "input_ids" + v_suffix not in npz:
+                    return False
         except Exception as e:
             logger.error(f"Error loading file: {npz_path}")
             raise e
 
         return True
 
-    def load_outputs_npz(self, npz_path: str) -> List[np.ndarray]:
+    def load_outputs_npz(self, npz_path: str, variation_index: Optional[int] = None) -> List[np.ndarray]:
         """
         Load outputs from a npz file
 
         Returns:
             List[np.ndarray]: hidden_state, input_ids, attention_mask
         """
+        v_suffix = f"_v{variation_index}" if variation_index is not None else ""
         data = np.load(npz_path)
-        hidden_state = data["hidden_state"]
-        attention_mask = data["attention_mask"]
-        input_ids = data["input_ids"]
+        hidden_state = data["hidden_state" + v_suffix]
+        attention_mask = data["attention_mask" + v_suffix]
+        input_ids = data["input_ids" + v_suffix]
         return [hidden_state, input_ids, attention_mask]
 
     @torch.no_grad()
@@ -216,13 +220,17 @@ class LuminaTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy)
         models: List[Any],
         text_encoding_strategy: TextEncodingStrategy,
         batch: List[train_util.ImageInfo],
+        text_encoder_cache_variations: int = 1,
+        variation_index: int = 0,
     ) -> None:
         """
         Args:
             tokenize_strategy (LuminaTokenizeStrategy): Tokenize strategy
             models (List[Any]): Text encoders
             text_encoding_strategy (LuminaTextEncodingStrategy):
-            infos (List): List of ImageInfo
+            batch (List): List of ImageInfo
+            text_encoder_cache_variations (int): Number of variations
+            variation_index (int): Variation index
 
         Returns:
             None
@@ -259,6 +267,7 @@ class LuminaTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy)
         attention_mask = attention_masks.cpu().numpy() # (B, S)
         input_ids = input_ids.cpu().numpy() # (B, S) 
 
+        v_suffix = f"_v{variation_index}" if text_encoder_cache_variations > 1 else ""
 
         for i, info in enumerate(batch):
             hidden_state_i = hidden_state[i]
@@ -267,18 +276,26 @@ class LuminaTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy)
 
             if self.cache_to_disk:
                 assert info.text_encoder_outputs_npz is not None, f"Text encoder cache outputs to disk not found for image {info.image_key}"
-                np.savez(
-                    info.text_encoder_outputs_npz,
-                    hidden_state=hidden_state_i,
-                    attention_mask=attention_mask_i,
-                    input_ids=input_ids_i,
-                )
+                kwargs = {}
+                if variation_index > 0 and os.path.exists(info.text_encoder_outputs_npz):
+                    with np.load(info.text_encoder_outputs_npz) as npz:
+                        kwargs = dict(npz)
+
+                kwargs["hidden_state" + v_suffix] = hidden_state_i
+                kwargs["attention_mask" + v_suffix] = attention_mask_i
+                kwargs["input_ids" + v_suffix] = input_ids_i
+                np.savez(info.text_encoder_outputs_npz, **kwargs)
             else:
-                info.text_encoder_outputs = [
-                    hidden_state_i,
-                    input_ids_i,
-                    attention_mask_i,
-                ]
+                if text_encoder_cache_variations > 1:
+                    if variation_index == 0:
+                        info.text_encoder_outputs = []
+                    info.text_encoder_outputs.append([hidden_state_i, input_ids_i, attention_mask_i])
+                else:
+                    info.text_encoder_outputs = [
+                        hidden_state_i,
+                        input_ids_i,
+                        attention_mask_i,
+                    ]
 
 
 class LuminaLatentsCachingStrategy(LatentsCachingStrategy):

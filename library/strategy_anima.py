@@ -168,7 +168,7 @@ class AnimaTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
     def get_outputs_npz_path(self, image_abs_path: str) -> str:
         return os.path.splitext(image_abs_path)[0] + self.ANIMA_TEXT_ENCODER_OUTPUTS_NPZ_SUFFIX
 
-    def is_disk_cached_outputs_expected(self, npz_path: str) -> bool:
+    def is_disk_cached_outputs_expected(self, npz_path: str, text_encoder_cache_variations: int = 1) -> bool:
         if not self.cache_to_disk:
             return False
         if not os.path.exists(npz_path):
@@ -178,29 +178,39 @@ class AnimaTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
 
         try:
             npz = np.load(npz_path)
-            if "prompt_embeds" not in npz:
-                return False
-            if "attn_mask" not in npz:
-                return False
-            if "t5_input_ids" not in npz:
-                return False
-            if "t5_attn_mask" not in npz:
-                return False
-            if "caption_dropout_rate" not in npz:
-                return False
+            for v in range(text_encoder_cache_variations):
+                v_suffix = f"_v{v}" if text_encoder_cache_variations > 1 else ""
+                if "prompt_embeds" + v_suffix not in npz:
+                    return False
+                if "attn_mask" + v_suffix not in npz:
+                    return False
+                if "t5_input_ids" + v_suffix not in npz:
+                    return False
+                if "t5_attn_mask" + v_suffix not in npz:
+                    return False
+                # caption_dropout_rate can be same for all variations if it's info.caption_dropout_rate
+                if "caption_dropout_rate" + v_suffix not in npz and "caption_dropout_rate" not in npz:
+                    return False
         except Exception as e:
             logger.error(f"Error loading file: {npz_path}")
             raise e
 
         return True
 
-    def load_outputs_npz(self, npz_path: str) -> List[np.ndarray]:
+    def load_outputs_npz(self, npz_path: str, variation_index: Optional[int] = None) -> List[np.ndarray]:
+        v_suffix = f"_v{variation_index}" if variation_index is not None else ""
         data = np.load(npz_path)
-        prompt_embeds = data["prompt_embeds"]
-        attn_mask = data["attn_mask"]
-        t5_input_ids = data["t5_input_ids"]
-        t5_attn_mask = data["t5_attn_mask"]
-        caption_dropout_rate = data["caption_dropout_rate"]
+        prompt_embeds = data["prompt_embeds" + v_suffix]
+        attn_mask = data["attn_mask" + v_suffix]
+        t5_input_ids = data["t5_input_ids" + v_suffix]
+        t5_attn_mask = data["t5_attn_mask" + v_suffix]
+        
+        # fallback for caption_dropout_rate
+        if "caption_dropout_rate" + v_suffix in data:
+            caption_dropout_rate = data["caption_dropout_rate" + v_suffix]
+        else:
+            caption_dropout_rate = data["caption_dropout_rate"]
+            
         return [prompt_embeds, attn_mask, t5_input_ids, t5_attn_mask, caption_dropout_rate]
 
     def cache_batch_outputs(
@@ -209,6 +219,8 @@ class AnimaTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
         models: List[Any],
         text_encoding_strategy: TextEncodingStrategy,
         infos: List,
+        text_encoder_cache_variations: int = 1,
+        variation_index: int = 0,
     ):
         anima_text_encoding_strategy: AnimaTextEncodingStrategy = text_encoding_strategy
         captions = [info.caption for info in infos]
@@ -227,6 +239,8 @@ class AnimaTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
         t5_input_ids = t5_input_ids.cpu().numpy().astype(np.int32)
         t5_attn_mask = t5_attn_mask.cpu().numpy().astype(np.int32)
 
+        v_suffix = f"_v{variation_index}" if text_encoder_cache_variations > 1 else ""
+
         for i, info in enumerate(infos):
             prompt_embeds_i = prompt_embeds[i]
             attn_mask_i = attn_mask[i]
@@ -235,16 +249,24 @@ class AnimaTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
             caption_dropout_rate = torch.tensor(info.caption_dropout_rate, dtype=torch.float32)
 
             if self.cache_to_disk:
-                np.savez(
-                    info.text_encoder_outputs_npz,
-                    prompt_embeds=prompt_embeds_i,
-                    attn_mask=attn_mask_i,
-                    t5_input_ids=t5_input_ids_i,
-                    t5_attn_mask=t5_attn_mask_i,
-                    caption_dropout_rate=caption_dropout_rate,
-                )
+                kwargs = {}
+                if variation_index > 0 and os.path.exists(info.text_encoder_outputs_npz):
+                    with np.load(info.text_encoder_outputs_npz) as npz:
+                        kwargs = dict(npz)
+
+                kwargs["prompt_embeds" + v_suffix] = prompt_embeds_i
+                kwargs["attn_mask" + v_suffix] = attn_mask_i
+                kwargs["t5_input_ids" + v_suffix] = t5_input_ids_i
+                kwargs["t5_attn_mask" + v_suffix] = t5_attn_mask_i
+                kwargs["caption_dropout_rate" + v_suffix] = caption_dropout_rate.cpu().numpy()
+                np.savez(info.text_encoder_outputs_npz, **kwargs)
             else:
-                info.text_encoder_outputs = (prompt_embeds_i, attn_mask_i, t5_input_ids_i, t5_attn_mask_i, caption_dropout_rate)
+                if text_encoder_cache_variations > 1:
+                    if variation_index == 0:
+                        info.text_encoder_outputs = []
+                    info.text_encoder_outputs.append((prompt_embeds_i, attn_mask_i, t5_input_ids_i, t5_attn_mask_i, caption_dropout_rate))
+                else:
+                    info.text_encoder_outputs = (prompt_embeds_i, attn_mask_i, t5_input_ids_i, t5_attn_mask_i, caption_dropout_rate)
 
 
 class AnimaLatentsCachingStrategy(LatentsCachingStrategy):

@@ -104,7 +104,7 @@ class FluxTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
     def get_outputs_npz_path(self, image_abs_path: str) -> str:
         return os.path.splitext(image_abs_path)[0] + FluxTextEncoderOutputsCachingStrategy.FLUX_TEXT_ENCODER_OUTPUTS_NPZ_SUFFIX
 
-    def is_disk_cached_outputs_expected(self, npz_path: str):
+    def is_disk_cached_outputs_expected(self, npz_path: str, text_encoder_cache_variations: int = 1):
         if not self.cache_to_disk:
             return False
         if not os.path.exists(npz_path):
@@ -114,14 +114,17 @@ class FluxTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
 
         try:
             npz = np.load(npz_path)
-            if "l_pooled" not in npz:
-                return False
-            if "t5_out" not in npz:
-                return False
-            if "txt_ids" not in npz:
-                return False
-            if "t5_attn_mask" not in npz:
-                return False
+            for v in range(text_encoder_cache_variations):
+                v_suffix = f"_v{v}" if text_encoder_cache_variations > 1 else ""
+                if "l_pooled" + v_suffix not in npz:
+                    return False
+                if "t5_out" + v_suffix not in npz:
+                    return False
+                if "txt_ids" + v_suffix not in npz:
+                    return False
+                if "t5_attn_mask" + v_suffix not in npz:
+                    return False
+
             if "apply_t5_attn_mask" not in npz:
                 return False
             npz_apply_t5_attn_mask = npz["apply_t5_attn_mask"]
@@ -133,23 +136,30 @@ class FluxTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
 
         return True
 
-    def load_outputs_npz(self, npz_path: str) -> List[np.ndarray]:
+    def load_outputs_npz(self, npz_path: str, variation_index: Optional[int] = None) -> List[np.ndarray]:
+        v_suffix = f"_v{variation_index}" if variation_index is not None else ""
         data = np.load(npz_path)
-        l_pooled = data["l_pooled"]
-        t5_out = data["t5_out"]
-        txt_ids = data["txt_ids"]
-        t5_attn_mask = data["t5_attn_mask"]
+        l_pooled = data["l_pooled" + v_suffix]
+        t5_out = data["t5_out" + v_suffix]
+        txt_ids = data["txt_ids" + v_suffix]
+        t5_attn_mask = data["t5_attn_mask" + v_suffix]
         # apply_t5_attn_mask should be same as self.apply_t5_attn_mask
         return [l_pooled, t5_out, txt_ids, t5_attn_mask]
 
     def cache_batch_outputs(
-        self, tokenize_strategy: TokenizeStrategy, models: List[Any], text_encoding_strategy: TextEncodingStrategy, infos: List
+        self,
+        tokenize_strategy: TokenizeStrategy,
+        models: List[Any],
+        text_encoding_strategy: TextEncodingStrategy,
+        infos: List,
+        text_encoder_cache_variations: int = 1,
+        variation_index: int = 0,
     ):
         if not self.warn_fp8_weights:
             if flux_utils.get_t5xxl_actual_dtype(models[1]) == torch.float8_e4m3fn:
                 logger.warning(
                     "T5 model is using fp8 weights for caching. This may affect the quality of the cached outputs."
-                    " / T5モデルはfp8の重みを使用しています。これはキャッシュの品質に影響を与える可能性があります。"
+                    " / T5モデルはfp8の重みを使用しています。これはキャッシュ의 품질에 영향을 줄 수 있습니다."
                 )
             self.warn_fp8_weights = True
 
@@ -173,6 +183,8 @@ class FluxTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
         txt_ids = txt_ids.cpu().numpy()
         t5_attn_mask = tokens_and_masks[2].cpu().numpy()
 
+        v_suffix = f"_v{variation_index}" if text_encoder_cache_variations > 1 else ""
+
         for i, info in enumerate(infos):
             l_pooled_i = l_pooled[i]
             t5_out_i = t5_out[i]
@@ -181,17 +193,25 @@ class FluxTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
             apply_t5_attn_mask_i = self.apply_t5_attn_mask
 
             if self.cache_to_disk:
-                np.savez(
-                    info.text_encoder_outputs_npz,
-                    l_pooled=l_pooled_i,
-                    t5_out=t5_out_i,
-                    txt_ids=txt_ids_i,
-                    t5_attn_mask=t5_attn_mask_i,
-                    apply_t5_attn_mask=apply_t5_attn_mask_i,
-                )
+                kwargs = {}
+                if variation_index > 0 and os.path.exists(info.text_encoder_outputs_npz):
+                    with np.load(info.text_encoder_outputs_npz) as npz:
+                        kwargs = dict(npz)
+
+                kwargs["l_pooled" + v_suffix] = l_pooled_i
+                kwargs["t5_out" + v_suffix] = t5_out_i
+                kwargs["txt_ids" + v_suffix] = txt_ids_i
+                kwargs["t5_attn_mask" + v_suffix] = t5_attn_mask_i
+                kwargs["apply_t5_attn_mask"] = apply_t5_attn_mask_i
+                np.savez(info.text_encoder_outputs_npz, **kwargs)
             else:
-                # it's fine that attn mask is not None. it's overwritten before calling the model if necessary
-                info.text_encoder_outputs = (l_pooled_i, t5_out_i, txt_ids_i, t5_attn_mask_i)
+                if text_encoder_cache_variations > 1:
+                    if variation_index == 0:
+                        info.text_encoder_outputs = []
+                    info.text_encoder_outputs.append((l_pooled_i, t5_out_i, txt_ids_i, t5_attn_mask_i))
+                else:
+                    # it's fine that attn mask is not None. it's overwritten before calling the model if necessary
+                    info.text_encoder_outputs = (l_pooled_i, t5_out_i, txt_ids_i, t5_attn_mask_i)
 
 
 class FluxLatentsCachingStrategy(LatentsCachingStrategy):

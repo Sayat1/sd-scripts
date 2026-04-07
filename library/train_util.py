@@ -468,6 +468,7 @@ class BaseSubset:
         face_crop_aug_range: Optional[Tuple[float, float]],
         random_crop: bool,
         cache_variations: int,
+        text_encoder_cache_variations: int,
         caption_dropout_rate: float,
         caption_dropout_every_n_epochs: int,
         caption_tag_dropout_rate: float,
@@ -496,6 +497,7 @@ class BaseSubset:
         self.face_crop_aug_range = face_crop_aug_range
         self.random_crop = random_crop
         self.cache_variations = cache_variations
+        self.text_encoder_cache_variations = text_encoder_cache_variations
         self.specific_buckets = specific_buckets
         self.caption_dropout_rate = caption_dropout_rate
         self.caption_dropout_every_n_epochs = caption_dropout_every_n_epochs
@@ -538,6 +540,7 @@ class DreamBoothSubset(BaseSubset):
         face_crop_aug_range,
         random_crop,
         cache_variations,
+        text_encoder_cache_variations,
         caption_dropout_rate,
         caption_dropout_every_n_epochs,
         caption_tag_dropout_rate,
@@ -569,6 +572,7 @@ class DreamBoothSubset(BaseSubset):
             face_crop_aug_range,
             random_crop,
             cache_variations,
+            text_encoder_cache_variations,
             caption_dropout_rate,
             caption_dropout_every_n_epochs,
             caption_tag_dropout_rate,
@@ -615,6 +619,7 @@ class FineTuningSubset(BaseSubset):
         face_crop_aug_range,
         random_crop,
         cache_variations,
+        text_encoder_cache_variations,
         caption_dropout_rate,
         caption_dropout_every_n_epochs,
         caption_tag_dropout_rate,
@@ -688,6 +693,7 @@ class ControlNetSubset(BaseSubset):
         face_crop_aug_range,
         random_crop,
         cache_variations,
+        text_encoder_cache_variations,
         caption_dropout_rate,
         caption_dropout_every_n_epochs,
         caption_tag_dropout_rate,
@@ -1197,12 +1203,12 @@ class BaseDataset(torch.utils.data.Dataset):
         return all(
             [
                 not (
-                    subset.caption_dropout_rate > 0
-                    and not cache_supports_dropout
+                    (subset.caption_dropout_rate > 0 and not cache_supports_dropout)
                     or subset.shuffle_caption
                     or subset.token_warmup_step > 0
                     or subset.caption_tag_dropout_rate > 0
                 )
+                or subset.text_encoder_cache_variations > 1
                 for subset in self.subsets
             ]
         )
@@ -1440,6 +1446,7 @@ class BaseDataset(torch.utils.data.Dataset):
 
         logger.info("checking cache validity...")
         for i, info in enumerate(tqdm(image_infos)):
+            subset = self.image_to_subset[info.image_key]
             # check disk cache exists and size of text encoder outputs
             if caching_strategy.cache_to_disk:
                 te_out_npz = caching_strategy.get_outputs_npz_path(info.absolute_path)
@@ -1450,7 +1457,7 @@ class BaseDataset(torch.utils.data.Dataset):
                 if i % num_processes != process_index:
                     continue
 
-                cache_available = caching_strategy.is_disk_cached_outputs_expected(te_out_npz)
+                cache_available = caching_strategy.is_disk_cached_outputs_expected(te_out_npz, subset.text_encoder_cache_variations)
                 if cache_available:  # do not add to batch
                     continue
 
@@ -1471,8 +1478,35 @@ class BaseDataset(torch.utils.data.Dataset):
         # iterate batches
         logger.info("caching Text Encoder outputs...")
         for batch in tqdm(batches, smoothing=1, total=len(batches)):
-            # cache_batch_latents(vae, cache_to_disk, batch, subset.flip_aug, subset.alpha_mask, subset.random_crop)
-            caching_strategy.cache_batch_outputs(tokenize_strategy, models, text_encoding_strategy, batch)
+            # get max variations in batch
+            max_variations = 1
+            for info in batch:
+                subset = self.image_to_subset[info.image_key]
+                max_variations = max(max_variations, subset.text_encoder_cache_variations)
+
+            # backup original captions
+            original_captions = [info.caption for info in batch]
+
+            for v in range(max_variations):
+                # if variation_index is greater than or equal to variation, skip (this is not perfect but enough)
+                # handle caption dropout and shuffle for each variation
+                for info in batch:
+                    subset = self.image_to_subset[info.image_key]
+                    if v < subset.text_encoder_cache_variations:
+                        # process_caption will handle dropout and shuffle
+                        info.caption = self.process_caption(subset, info.caption)
+                    else:
+                        # if variation is not needed for this subset, skip
+                        pass
+
+                # cache_batch_latents(vae, cache_to_disk, batch, subset.flip_aug, subset.alpha_mask, subset.random_crop)
+                caching_strategy.cache_batch_outputs(
+                    tokenize_strategy, models, text_encoding_strategy, batch, max_variations, variation_index=v
+                )
+
+                # restore original captions for next variation
+                for i, info in enumerate(batch):
+                    info.caption = original_captions[i]
 
     # if weight_dtype is specified, Text Encoder itself and output will be converted to the dtype
     # this method is only for SDXL, but it should be implemented here because it needs to be a method of dataset
@@ -1840,7 +1874,7 @@ class BaseDataset(torch.utils.data.Dataset):
             target_sizes_hw.append((int(target_size[1]), int(target_size[0])))
             flippeds.append(flipped)
 
-            # captionとtext encoder outputを処理する
+            # caption과 text encoder output을 처리する
             caption = image_info.caption  # default
 
             tokenization_required = (
@@ -1851,11 +1885,16 @@ class BaseDataset(torch.utils.data.Dataset):
 
             if image_info.text_encoder_outputs is not None:
                 # cached
-                text_encoder_outputs = image_info.text_encoder_outputs
+                if isinstance(image_info.text_encoder_outputs, list) and subset.text_encoder_cache_variations > 1:
+                    v_idx = random.randint(0, len(image_info.text_encoder_outputs) - 1)
+                    text_encoder_outputs = image_info.text_encoder_outputs[v_idx]
+                else:
+                    text_encoder_outputs = image_info.text_encoder_outputs
             elif image_info.text_encoder_outputs_npz is not None:
                 # on disk
+                v_idx = random.randint(0, subset.text_encoder_cache_variations - 1) if subset.text_encoder_cache_variations > 1 else None
                 text_encoder_outputs = self.text_encoder_output_caching_strategy.load_outputs_npz(
-                    image_info.text_encoder_outputs_npz
+                    image_info.text_encoder_outputs_npz, variation_index=v_idx
                 )
             else:
                 tokenization_required = True

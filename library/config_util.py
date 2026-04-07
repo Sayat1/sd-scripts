@@ -67,6 +67,7 @@ class BaseSubsetParams:
     face_crop_aug_range: Optional[Tuple[float, float]] = None
     random_crop: bool = False
     cache_variations: int = 1
+    text_encoder_cache_variations: int = 1
     caption_prefix: Optional[str] = None
     caption_suffix: Optional[str] = None
     caption_dropout_rate: float = 0.0
@@ -192,6 +193,7 @@ class ConfigSanitizer:
         "num_repeats": int,
         "random_crop": bool,
         "cache_variations": int,
+        "text_encoder_cache_variations": int,
         "specific_buckets": [str],
         "shuffle_caption": bool,
         "keep_tokens": int,
@@ -571,6 +573,7 @@ def generate_dataset_group_by_blueprint(dataset_group_blueprint: DatasetGroupBlu
                     face_crop_aug_range: {subset.face_crop_aug_range}
                     random_crop: {subset.random_crop}
                     cache_variations: {subset.cache_variations}
+                    text_encoder_cache_variations: {subset.text_encoder_cache_variations}
                     token_warmup_min: {subset.token_warmup_min},
                     token_warmup_step: {subset.token_warmup_step},
                     alpha_mask: {subset.alpha_mask}
