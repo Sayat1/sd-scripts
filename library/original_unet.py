@@ -120,6 +120,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+try:
+    import flash_attn
+    from flash_attn.flash_attn_interface import flash_attn_func
+except ImportError:
+    flash_attn = None
+    flash_attn_func = None
+
 BLOCK_OUT_CHANNELS: Tuple[int] = (320, 640, 1280, 1280)
 TIMESTEP_INPUT_DIM = BLOCK_OUT_CHANNELS[0]
 TIME_EMBED_DIM = BLOCK_OUT_CHANNELS[0] * 4
@@ -593,6 +600,7 @@ class CrossAttention(nn.Module):
         self.use_memory_efficient_attention_xformers = False
         self.use_memory_efficient_attention_mem_eff = False
         self.use_sdpa = False
+        self.use_flash_attn = False
 
         # Attention processor
         self.processor = None
@@ -603,6 +611,9 @@ class CrossAttention(nn.Module):
 
     def set_use_sdpa(self, sdpa):
         self.use_sdpa = sdpa
+
+    def set_use_flash_attn(self, flash_attn):
+        self.use_flash_attn = flash_attn
 
     def reshape_heads_to_batch_dim(self, tensor):
         batch_size, seq_len, dim = tensor.shape
@@ -640,6 +651,8 @@ class CrossAttention(nn.Module):
             return self.forward_memory_efficient_mem_eff(hidden_states, context, mask)
         if self.use_sdpa:
             return self.forward_sdpa(hidden_states, context, mask)
+        if self.use_flash_attn:
+            return self.forward_flash_attn(hidden_states, context, mask)
 
         query = self.to_q(hidden_states)
         context = context if context is not None else hidden_states
@@ -742,6 +755,33 @@ class CrossAttention(nn.Module):
         out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False)
 
         out = rearrange(out, "b h n d -> b n (h d)", h=h)
+
+        out = self.to_out[0](out)
+        return out
+
+    def forward_flash_attn(self, x, context=None, mask=None):
+        if flash_attn_func is None:
+            raise ImportError(
+                "flash_attn is not installed. Please install it with `pip install flash-attn` / flash_attn がインストールされていません。`pip install flash-attn` でインストールしてください。"
+            )
+
+        h = self.heads
+        q_in = self.to_q(x)
+        context = context if context is not None else x
+        context = context.to(x.dtype)
+        k_in = self.to_k(context)
+        v_in = self.to_v(context)
+
+        q, k, v = map(lambda t: rearrange(t, "b n (h d) -> b n h d", h=h), (q_in, k_in, v_in))
+        del q_in, k_in, v_in
+
+        q = q.contiguous()
+        k = k.contiguous()
+        v = v.contiguous()
+
+        out = flash_attn_func(q, k, v, dropout_p=0.0, causal=False)
+
+        out = rearrange(out, "b n h d -> b n (h d)", h=h)
 
         out = self.to_out[0](out)
         return out
@@ -850,6 +890,10 @@ class BasicTransformerBlock(nn.Module):
         self.attn1.set_use_sdpa(sdpa)
         self.attn2.set_use_sdpa(sdpa)
 
+    def set_use_flash_attn(self, flash_attn: bool):
+        self.attn1.set_use_flash_attn(flash_attn)
+        self.attn2.set_use_flash_attn(flash_attn)
+
     def forward(self, hidden_states, context=None, timestep=None):
         # 1. Self-Attention
         norm_hidden_states = self.norm1(hidden_states)
@@ -914,6 +958,10 @@ class Transformer2DModel(nn.Module):
     def set_use_sdpa(self, sdpa):
         for transformer in self.transformer_blocks:
             transformer.set_use_sdpa(sdpa)
+
+    def set_use_flash_attn(self, flash_attn):
+        for transformer in self.transformer_blocks:
+            transformer.set_use_flash_attn(flash_attn)
 
     def forward(self, hidden_states, encoder_hidden_states=None, timestep=None, return_dict: bool = True):
         # 1. Input
@@ -1000,6 +1048,10 @@ class CrossAttnDownBlock2D(nn.Module):
         for attn in self.attentions:
             attn.set_use_sdpa(sdpa)
 
+    def set_use_flash_attn(self, flash_attn):
+        for attn in self.attentions:
+            attn.set_use_flash_attn(flash_attn)
+
     def forward(self, hidden_states, temb=None, encoder_hidden_states=None):
         output_states = ()
 
@@ -1082,6 +1134,10 @@ class UNetMidBlock2DCrossAttn(nn.Module):
     def set_use_sdpa(self, sdpa):
         for attn in self.attentions:
             attn.set_use_sdpa(sdpa)
+
+    def set_use_flash_attn(self, flash_attn):
+        for attn in self.attentions:
+            attn.set_use_flash_attn(flash_attn)
 
     def forward(self, hidden_states, temb=None, encoder_hidden_states=None):
         for i, resnet in enumerate(self.resnets):
@@ -1275,6 +1331,10 @@ class CrossAttnUpBlock2D(nn.Module):
     def set_use_sdpa(self, sdpa):
         for attn in self.attentions:
             attn.set_use_sdpa(sdpa)
+
+    def set_use_flash_attn(self, flash_attn):
+        for attn in self.attentions:
+            attn.set_use_flash_attn(flash_attn)
 
     def forward(
         self,
@@ -1522,6 +1582,12 @@ class UNet2DConditionModel(nn.Module):
         modules = self.down_blocks + [self.mid_block] + self.up_blocks
         for module in modules:
             module.set_use_sdpa(sdpa)
+
+    def set_use_flash_attn(self, flash_attn: bool) -> None:
+        modules = self.down_blocks + [self.mid_block] + self.up_blocks
+        for module in modules:
+            if hasattr(module, "set_use_flash_attn"):
+                module.set_use_flash_attn(flash_attn)
 
     def set_gradient_checkpointing(self, value=False):
         modules = self.down_blocks + [self.mid_block] + self.up_blocks

@@ -1262,7 +1262,7 @@ class BaseDataset(torch.utils.data.Dataset):
             # get cache_variations from subset
             subset = self.image_to_subset[batch[0].image_key]
             cache_variations = subset.cache_variations if cond.random_crop or cond.color_aug or cond.random_color_bg else 1
-
+            logger.info(f"With Cache latent variations: {cache_variations}")
             caching_strategy.cache_batch_latents(
                 model,
                 batch,
@@ -3614,7 +3614,7 @@ def get_git_revision_hash() -> str:
 
 
 #     diffusers.models.attention.CrossAttention.forward = forward_xformers
-def replace_unet_modules(unet: UNet2DConditionModel, mem_eff_attn, xformers, sdpa):
+def replace_unet_modules(unet: UNet2DConditionModel, mem_eff_attn, xformers, sdpa, flash_attn=False):
     if mem_eff_attn:
         logger.info("Enable memory efficient attention for U-Net")
         unet.set_use_memory_efficient_attention(False, True)
@@ -3629,6 +3629,13 @@ def replace_unet_modules(unet: UNet2DConditionModel, mem_eff_attn, xformers, sdp
     elif sdpa:
         logger.info("Enable SDPA for U-Net")
         unet.set_use_sdpa(True)
+    elif flash_attn:
+        try:
+            import flash_attn
+        except ImportError:
+            raise ImportError("No flash_attn / flash_attnがインストールされていないようです")
+        logger.info("Enable Flash Attention 2 for U-Net")
+        unet.set_use_flash_attn(True)
 
 
 """
@@ -4211,6 +4218,11 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         "--sdpa",
         action="store_true",
         help="use sdpa for CrossAttention (requires PyTorch 2.0) / CrossAttentionにsdpaを使う（PyTorch 2.0が必要）",
+    )
+    parser.add_argument(
+        "--flash_attn",
+        action="store_true",
+        help="use Flash Attention 2 for CrossAttention / CrossAttentionにFlash Attention 2を使う",
     )
     parser.add_argument(
         "--vae",
