@@ -379,7 +379,7 @@ class AugHelper:
     # albumentationsへの依存をなくしたがとりあえず同じinterfaceを持たせる
 
     def __init__(self):
-        pass
+        self.color_pool = []
 
     def color_aug(self, image: np.ndarray):
         hue_shift_limit = 8
@@ -431,13 +431,24 @@ class AugHelper:
 
             color = np.array([r * 255, g * 255, b * 255], dtype=np.uint8)
             return color
+        
+        def get_random_origin_color():
+            if len(self.color_pool) == 0:
+                self.color_pool.append(np.array([255,0,0], dtype=np.uint8)) # red
+                self.color_pool.append(np.array([0,255,0], dtype=np.uint8)) # blue
+                self.color_pool.append(np.array([0,0,255], dtype=np.uint8)) # green
+                self.color_pool.append(np.array([255,255,255], dtype=np.uint8)) # white
+                self.color_pool.append(np.array([0,0,0], dtype=np.uint8)) # black
+                random.shuffle(self.color_pool)
+            return self.color_pool.pop()
+
 
         if image.shape[2] == 4:
             alpha = image[:, :, 3:4].astype(np.float32) / 255.0
             if (alpha == 1.0).all():
                 logger.warning("random_color_background is applied to an image with alpha channel but all pixels are fully opaque. This should not happen.")
                 return image
-            color = get_random_background_color()
+            color = get_random_origin_color()
             background = np.full(image[:, :, :3].shape, color, dtype=np.uint8)
             image_rgb = image[:, :, :3]
             image_rgb = (image_rgb.astype(np.float32) * alpha + background.astype(np.float32) * (1.0 - alpha)).astype(np.uint8)
@@ -3255,12 +3266,13 @@ def load_images_and_masks_for_caching(
     alpha_masks: List[np.ndarray] = []
     original_sizes: List[Tuple[int, int]] = []
     crop_ltrbs: List[Tuple[int, int, int, int]] = []
+    aug_helper = AugHelper() if color_aug or random_color_bg else None
     for info in image_infos:
         image = load_image(info.absolute_path, True) if info.image is None else np.array(info.image, np.uint8)
 
         # random color background
         if random_color_bg:
-            image = AugHelper().random_color_background(image)
+            image = aug_helper.random_color_background(image)
 
         # TODO 画像のメタデータが壊れていて、メタデータから割り当てたbucketと実際の画像サイズが一致しない場合があるのでチェック追加要
         image, original_size, crop_ltrb = trim_and_resize_if_required(
@@ -3270,7 +3282,7 @@ def load_images_and_masks_for_caching(
         # color aug
         if color_aug:
             img_rgb = image[:, :, :3]
-            img_rgb = AugHelper().color_aug(img_rgb)["image"]
+            img_rgb = aug_helper.color_aug(img_rgb)["image"]
             image[:, :, :3] = img_rgb
 
         original_sizes.append(original_size)
