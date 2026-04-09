@@ -541,7 +541,7 @@ class LatentsCachingStrategy:
             v_suffix = f"_v{v}" if cache_variations > 1 else ""
 
             img_tensor, alpha_masks, original_sizes, crop_ltrbs = train_util.load_images_and_masks_for_caching(
-                image_infos, apply_alpha_mask, random_crop, color_aug, random_color_bg
+                image_infos, apply_alpha_mask, random_crop, color_aug, random_color_bg, variant=v
             )
             img_tensor = img_tensor.to(device=vae_device, dtype=vae_dtype)
 

@@ -401,7 +401,7 @@ class AugHelper:
 
         return {"image": image}
 
-    def random_color_background(self, image: np.ndarray):
+    def random_color_background(self, image: np.ndarray, variant: int = 0):
         def get_random_background_color():
             import colorsys
             """
@@ -440,7 +440,7 @@ class AugHelper:
                 self.color_pool.append(np.array([255,255,255], dtype=np.uint8)) # white
                 self.color_pool.append(np.array([0,0,0], dtype=np.uint8)) # black
                 random.shuffle(self.color_pool)
-            return self.color_pool.pop()
+            return self.color_pool[variant % len(self.color_pool)]
 
 
         if image.shape[2] == 4:
@@ -3250,7 +3250,7 @@ def trim_and_resize_if_required(
 
 # for new_cache_latents
 def load_images_and_masks_for_caching(
-    image_infos: List[ImageInfo], use_alpha_mask: bool, random_crop: bool, color_aug: bool = False, random_color_bg: bool = False
+    image_infos: List[ImageInfo], use_alpha_mask: bool, random_crop: bool, color_aug: bool = False, random_color_bg: bool = False, variant: int = 0
 ) -> Tuple[torch.Tensor, List[np.ndarray], List[Tuple[int, int]], List[Tuple[int, int, int, int]]]:
     r"""
     requires image_infos to have: [absolute_path or image], bucket_reso, resized_size
@@ -3272,7 +3272,7 @@ def load_images_and_masks_for_caching(
 
         # random color background
         if random_color_bg:
-            image = aug_helper.random_color_background(image)
+            image = aug_helper.random_color_background(image, variant=variant)
 
         # TODO 画像のメタデータが壊れていて、メタデータから割り当てたbucketと実際の画像サイズが一致しない場合があるのでチェック追加要
         image, original_size, crop_ltrb = trim_and_resize_if_required(
