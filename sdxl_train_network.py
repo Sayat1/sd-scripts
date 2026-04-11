@@ -195,7 +195,8 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
         weight_dtype,
         indices: Optional[List[int]] = None,
     ):
-        noisy_latents = noisy_latents.to(weight_dtype)  # TODO check why noisy_latents is not weight_dtype
+        #최적화 조언에 따라(memory_format만)
+        noisy_latents = noisy_latents.to(weight_dtype, memory_format=torch.channels_last)  # TODO check why noisy_latents is not weight_dtype
 
         # get size embeddings
         orig_size = batch["original_sizes_hw"]
@@ -214,6 +215,7 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
             timesteps = timesteps[indices]
             text_embedding = text_embedding[indices]
             vector_embedding = vector_embedding[indices]
+
 
         noise_pred = unet(noisy_latents, timesteps, text_embedding, vector_embedding)
         return noise_pred

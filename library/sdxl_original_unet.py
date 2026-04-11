@@ -31,6 +31,7 @@ from torch import nn
 from torch.nn import functional as F
 from einops import rearrange
 from library.utils import setup_logging
+from diffusers.utils.import_utils import is_torch_version
 
 setup_logging()
 import logging
@@ -281,7 +282,7 @@ def get_timestep_embedding(
 # Deep Shrink: We do not common this function, because minimize dependencies.
 def resize_like(x, target, mode="bicubic", align_corners=False):
     org_dtype = x.dtype
-    if org_dtype == torch.bfloat16:
+    if org_dtype == torch.bfloat16 and is_torch_version("<", "2.1"):
         x = x.to(torch.float32)
 
     if x.shape[-2:] != target.shape[-2:]:
@@ -290,7 +291,7 @@ def resize_like(x, target, mode="bicubic", align_corners=False):
         else:
             x = F.interpolate(x, size=target.shape[-2:], mode=mode, align_corners=align_corners)
 
-    if org_dtype == torch.bfloat16:
+    if org_dtype == torch.bfloat16 and is_torch_version("<", "2.1"):
         x = x.to(org_dtype)
     return x
 
@@ -826,11 +827,12 @@ class Upsample2D(nn.Module):
         # TODO(Suraj): Remove this cast once the issue is fixed in PyTorch
         # https://github.com/pytorch/pytorch/issues/86679
         dtype = hidden_states.dtype
-        if dtype == torch.bfloat16:
+        if dtype == torch.bfloat16 and is_torch_version("<", "2.1"):
             hidden_states = hidden_states.to(torch.float32)
 
         # upsample_nearest_nhwc fails with large batch sizes. see https://github.com/huggingface/diffusers/issues/984
-        if hidden_states.shape[0] >= 64:
+        #최적화 제안에 따라 수정
+        if hidden_states.shape[0] >= 64 and not hidden_states.is_contiguous(memory_format=torch.channels_last):
             hidden_states = hidden_states.contiguous()
 
         # if `output_size` is passed we force the interpolation output size and do not make use of `scale_factor=2`
@@ -840,7 +842,7 @@ class Upsample2D(nn.Module):
             hidden_states = F.interpolate(hidden_states, size=output_size, mode="nearest")
 
         # If the input is bfloat16, we cast back to bfloat16
-        if dtype == torch.bfloat16:
+        if dtype == torch.bfloat16 and is_torch_version("<", "2.1"):
             hidden_states = hidden_states.to(dtype)
 
         hidden_states = self.conv(hidden_states)
@@ -1256,7 +1258,7 @@ class InferSdxlUNet2DConditionModel:
                 ):
                     # print("downsample", h.shape, self.ds_ratio)
                     org_dtype = h.dtype
-                    if org_dtype == torch.bfloat16:
+                    if org_dtype == torch.bfloat16 and is_torch_version("<", "2.1"):
                         h = h.to(torch.float32)
                     h = F.interpolate(h, scale_factor=self.ds_ratio, mode="bicubic", align_corners=False).to(org_dtype)
 
