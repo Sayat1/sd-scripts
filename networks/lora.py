@@ -440,6 +440,8 @@ def create_network(
             conv_alpha = 1.0
         else:
             conv_alpha = float(conv_alpha)
+    simple_conv = kwargs.get("simple_conv", False)
+
 
     # block dim/alpha/lr
     block_dims = kwargs.get("block_dims", None)
@@ -489,6 +491,7 @@ def create_network(
         block_alphas=block_alphas,
         conv_block_dims=conv_block_dims,
         conv_block_alphas=conv_block_alphas,
+        simple_conv=simple_conv,
         varbose=True,
         is_sdxl=is_sdxl,
     )
@@ -866,6 +869,7 @@ class LoRANetwork(torch.nn.Module):
 
     UNET_TARGET_REPLACE_MODULE = ["Transformer2DModel"]
     UNET_TARGET_REPLACE_MODULE_CONV2D_3X3 = ["ResnetBlock2D", "Downsample2D", "Upsample2D"]
+    UNET_TARGET_REPLACE_MODULE_CONV2D_3X3_SIMPLE = ["ResnetBlock2D"]
     TEXT_ENCODER_TARGET_REPLACE_MODULE = ["CLIPAttention", "CLIPSdpaAttention", "CLIPMLP"]
     LORA_PREFIX_UNET = "lora_unet"
     LORA_PREFIX_TEXT_ENCODER = "lora_te"
@@ -890,6 +894,7 @@ class LoRANetwork(torch.nn.Module):
         block_alphas: Optional[List[float]] = None,
         conv_block_dims: Optional[List[int]] = None,
         conv_block_alphas: Optional[List[float]] = None,
+        simple_conv: Optional[bool] = False,
         modules_dim: Optional[Dict[str, int]] = None,
         modules_alpha: Optional[Dict[str, int]] = None,
         module_class: Type[object] = LoRAModule,
@@ -940,6 +945,8 @@ class LoRANetwork(torch.nn.Module):
                 logger.info(
                     f"apply LoRA to Conv2d with kernel size (3,3). dim (rank): {self.conv_lora_dim}, alpha: {self.conv_alpha}"
                 )
+                if simple_conv:
+                    logger.info(f"create ResnetBlock2D Conv2d module only.")
 
         # create module instances
         def create_modules(
@@ -1037,7 +1044,10 @@ class LoRANetwork(torch.nn.Module):
         # extend U-Net target modules if conv2d 3x3 is enabled, or load from weights
         target_modules = LoRANetwork.UNET_TARGET_REPLACE_MODULE
         if modules_dim is not None or self.conv_lora_dim is not None or conv_block_dims is not None:
-            target_modules += LoRANetwork.UNET_TARGET_REPLACE_MODULE_CONV2D_3X3
+            if simple_conv:
+                target_modules += LoRANetwork.UNET_TARGET_REPLACE_MODULE_CONV2D_3X3_SIMPLE
+            else:
+                target_modules += LoRANetwork.UNET_TARGET_REPLACE_MODULE_CONV2D_3X3
 
         self.unet_loras, skipped_un = create_modules(True, None, unet, target_modules)
         logger.info(f"create LoRA for U-Net: {len(self.unet_loras)} modules.")

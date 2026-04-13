@@ -15,3 +15,5 @@ MagicMock
 references
 /output
 /clipoutput
+/node_modules
+*.js

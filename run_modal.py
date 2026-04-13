@@ -11,8 +11,33 @@ import modal
 
 model_volume = modal.Volume.from_name("myvolume", create_if_missing=True, version=2)
 MOUNT_DIR = "/root/output/"  # modal_output, due to "cannot mount volume on non-empty path" requirement
+# image = (
+#         modal.Image.from_registry("nvidia/cuda:13.2.0-base-ubuntu24.04", add_python="3.11")
+#         # install required system and pip packages, more about this modal approach: https://modal.com/docs/examples/dreambooth_app
+#         .apt_install(
+#             "libgl1",
+#             "libglib2.0-0",
+#             "git",
+#             "build-essential",
+#             "clang",
+#             "pkg-config"
+#         )
+#         .run_commands(
+#             "echo rebuild-34",
+#             "pip config set global.extra-index-url https://download.pytorch.org/whl/nightly/cu132",
+#             "pip install --upgrade pip",
+#             "cd /root && git clone -b 'main' https://github.com/Sayat1/sd-scripts",
+#             "pip install -r /root/sd-scripts/requirements.txt",
+#             "pip install --force-reinstall --no-deps git+https://github.com/Sayat1/prodigy-plus-schedule-free.git@2.0.0",
+#             "pip install -U git+https://github.com/KohakuBlueleaf/LyCORIS.git --force --no-deps",
+#             "pip install hf_transfer",
+#             "pip install torchvision",
+#             "pip install triton"
+#         )
+#     )
+
 image = (
-        modal.Image.from_registry("nvidia/cuda:13.2.0-base-ubuntu24.04", add_python="3.11")
+        modal.Image.from_registry("nvidia/cuda:12.9.1-base-ubuntu24.04", add_python="3.11")
         # install required system and pip packages, more about this modal approach: https://modal.com/docs/examples/dreambooth_app
         .apt_install(
             "libgl1",
@@ -23,18 +48,20 @@ image = (
             "pkg-config"
         )
         .run_commands(
-            "echo rebuild-25",
-            "pip config set global.extra-index-url https://download.pytorch.org/whl/nightly/cu132",
+            "echo rebuild-7",
+            "pip config set global.extra-index-url https://download.pytorch.org/whl/cu129",
             "pip install --upgrade pip",
+            "pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu129",
             "cd /root && git clone -b 'main' https://github.com/Sayat1/sd-scripts",
             "pip install -r /root/sd-scripts/requirements.txt",
             "pip install --force-reinstall --no-deps git+https://github.com/Sayat1/prodigy-plus-schedule-free.git@2.0.0",
-            "pip install -U lycoris-lora",
+            "pip install -U git+https://github.com/KohakuBlueleaf/LyCORIS.git --force --no-deps",
             "pip install hf_transfer",
-            "pip install torchvision",
-            "pip install triton"
+            "pip install triton",
+            "pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl"
         )
     )
+
 
 
 # create the Modal app with the necessary mounts and volumes
