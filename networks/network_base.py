@@ -41,7 +41,8 @@ def detect_arch_config(unet, text_encoders) -> ArchConfig:
             unet_prefix="lora_unet",
             te_prefixes=["lora_te1", "lora_te2"],
             default_excludes=[],
-            unet_conv_target_modules=["ResnetBlock2D", "Downsample2D", "Upsample2D"],
+            #unet_conv_target_modules=["ResnetBlock2D", "Downsample2D", "Upsample2D"],
+            unet_conv_target_modules=["ResnetBlock2D"],
         )
 
     # Check Anima: look for Block class in named_modules

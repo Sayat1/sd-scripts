@@ -5389,7 +5389,11 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
             logger.info(f"use Prodigy optimizer | {optimizer_kwargs}")
             optimizer_class = prodigyopt.Prodigy
             optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
-
+    elif optimizer_type == "Automagic".lower():
+        from library import automagic
+        logger.info(f"use Automagic optimizer | {optimizer_kwargs}")
+        optimizer_class = automagic.Automagic
+        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
     elif optimizer_type == "Adafactor".lower():
         # 引数を確認して適宜補正する
         if "relative_step" not in optimizer_kwargs:

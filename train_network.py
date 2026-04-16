@@ -85,6 +85,10 @@ class NetworkTrainer:
         if mean_combined_norm is not None:
             logs["norm/avg_combined_norm"] = mean_combined_norm
 
+        if args.optimizer_type.lower() == "Automagic".lower():
+            opt = optimizer.optimizer
+            opt_lrs = opt.get_learning_rates()
+
         lrs = lr_scheduler.get_last_lr()
         for i, lr in enumerate(lrs):
             if lr_descriptions is not None:
@@ -107,7 +111,12 @@ class NetworkTrainer:
                     if "effective_lr" in opt.param_groups[i]:
                         logs[f"lr/d*eff_lr/{lr_desc}"] = opt.param_groups[i]["d"] * opt.param_groups[i]["effective_lr"]
                     logs[f"lr/d*lr/{lr_desc}"] = opt.param_groups[i]["d"] * opt.param_groups[i]["lr"]
-                    
+
+            if args.optimizer_type.lower() == "Automagic".lower():
+                if isinstance(opt_lrs, list):
+                    logs[f"lr/auto_lr/{lr_desc}"] = opt_lrs[i]
+                else:
+                    logs[f"lr/auto_lr/{lr_desc}"] = opt_lrs
 
         return logs
 
