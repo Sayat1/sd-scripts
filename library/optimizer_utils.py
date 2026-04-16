@@ -1,7 +1,6 @@
 import torch
 from torch import Tensor
 from typing import Optional
-from optimum.quanto import QBytesTensor
 
 
 def compute_scale_for_dtype(tensor, dtype):
@@ -74,23 +73,8 @@ def update_parameter(target, result_float):
         target: The parameter to update (either torch.Tensor or QBytesTensor)
         result_float: The new values to assign (torch.Tensor)
     """
-    if isinstance(target, QBytesTensor):
-        # Get the target dtype from the existing quantized tensor
-        target_dtype = target._data.dtype
-        
-        # Handle device placement
-        device = target._data.device
-        result_float = result_float.to(device)
-        
-        # Compute new quantized values and scale
-        quantized_data, new_scale = quantize_tensor(result_float, target_dtype)
-        
-        # Update the internal tensors with newly computed values
-        target._data.copy_(quantized_data)
-        target._scale.copy_(new_scale)
-    else:
-        # Regular tensor update
-        target.copy_(result_float)
+    # Regular tensor update
+    target.copy_(result_float)
 
 
 def get_format_params(dtype: torch.dtype) -> tuple[int, int]:

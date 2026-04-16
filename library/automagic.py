@@ -1,7 +1,6 @@
 from typing import List
 import torch
 from library.optimizer_utils import Auto8bitTensor, copy_stochastic, stochastic_grad_accummulation
-from optimum.quanto import QBytesTensor
 import random
 
 #from https://github.com/ostris/ai-toolkit/blob/main/toolkit/optimizers/automagic.py
@@ -201,8 +200,6 @@ class Automagic(torch.optim.Optimizer):
 
                 p_data_fp32 = p
 
-                if isinstance(p_data_fp32, QBytesTensor):
-                    p_data_fp32 = p_data_fp32.dequantize()
                 if p.dtype != torch.float32:
                     p_data_fp32 = p_data_fp32.clone().float()
 
