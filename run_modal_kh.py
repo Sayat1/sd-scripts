@@ -11,62 +11,55 @@ import modal
 
 model_volume = modal.Volume.from_name("myvolume", create_if_missing=True, version=2)
 MOUNT_DIR = "/root/output/"  # modal_output, due to "cannot mount volume on non-empty path" requirement
+image = (
+        modal.Image.from_registry("nvidia/cuda:13.2.0-base-ubuntu24.04", add_python="3.11")
+        # install required system and pip packages, more about this modal approach: https://modal.com/docs/examples/dreambooth_app
+        .apt_install(
+            "libgl1",
+            "libglib2.0-0",
+            "git"
+        )
+        .run_commands(
+            "echo rebuild-5",
+            "pip config set global.extra-index-url https://download.pytorch.org/whl/nightly/cu132",
+            "pip install --upgrade pip",
+            "cd /root && git clone -b 'main' https://github.com/Sayat1/sd-scripts",
+        ).workdir(
+            "/root/sd-scripts/"
+        ).uv_pip_install(
+            requirements=["requirements.txt"]
+        ).uv_pip_install(
+            "hf_transfer",
+            "torchvision",
+            "triton"
+        )
+    )
+
 # image = (
-#         modal.Image.from_registry("nvidia/cuda:13.2.0-base-ubuntu24.04", add_python="3.11")
+#         modal.Image.from_registry("nvidia/cuda:12.9.1-base-ubuntu24.04", add_python="3.11")
 #         # install required system and pip packages, more about this modal approach: https://modal.com/docs/examples/dreambooth_app
 #         .apt_install(
 #             "libgl1",
 #             "libglib2.0-0",
-#             "git",
-#             "build-essential",
-#             "clang",
-#             "pkg-config"
+#             "git"
 #         )
 #         .run_commands(
-#             "echo rebuild-34",
-#             "pip config set global.extra-index-url https://download.pytorch.org/whl/nightly/cu132",
+#             "echo rebuild-9",
+#             "pip config set global.extra-index-url https://download.pytorch.org/whl/cu129",
 #             "pip install --upgrade pip",
+#             "pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu129",
 #             "cd /root && git clone -b 'main' https://github.com/Sayat1/sd-scripts",
 #             "pip install -r /root/sd-scripts/requirements.txt",
 #             "pip install --force-reinstall --no-deps git+https://github.com/Sayat1/prodigy-plus-schedule-free.git@2.0.0",
 #             "pip install -U git+https://github.com/KohakuBlueleaf/LyCORIS.git --force --no-deps",
 #             "pip install hf_transfer",
-#             "pip install torchvision",
-#             "pip install triton"
+#             "pip install triton",
+#             "pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl"
 #         )
 #     )
 
-image = (
-        modal.Image.from_registry("nvidia/cuda:12.9.1-base-ubuntu24.04", add_python="3.11")
-        # install required system and pip packages, more about this modal approach: https://modal.com/docs/examples/dreambooth_app
-        .apt_install(
-            "libgl1",
-            "libglib2.0-0",
-            "git",
-            "build-essential",
-            "clang",
-            "pkg-config"
-        )
-        .run_commands(
-            "echo rebuild-7",
-            "pip config set global.extra-index-url https://download.pytorch.org/whl/cu129",
-            "pip install --upgrade pip",
-            "pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu129",
-            "cd /root && git clone -b 'main' https://github.com/Sayat1/sd-scripts",
-            "pip install -r /root/sd-scripts/requirements.txt",
-            "pip install --force-reinstall --no-deps git+https://github.com/Sayat1/prodigy-plus-schedule-free.git@2.0.0",
-            "pip install -U git+https://github.com/KohakuBlueleaf/LyCORIS.git --force --no-deps",
-            "pip install hf_transfer",
-            "pip install triton",
-            "pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl"
-        )
-    )
-
-
-
 # create the Modal app with the necessary mounts and volumes
-app = modal.App(name="modal-training")
-
+app = modal.App(name="modal-training-kh",image=image, volumes={MOUNT_DIR: model_volume})
 
 @app.function(
     # request a GPU with at least 24GB VRAM
@@ -74,12 +67,11 @@ app = modal.App(name="modal-training")
     gpu="L40S", # gpu="H100" L40S
     # more about modal timeouts: https://modal.com/docs/guide/timeouts
     timeout=3600*3,  # 2 hours, increase or decrease if needed,
-    image=image, 
-    volumes={MOUNT_DIR: model_volume}
 )
-def remote_main(args, hf_token, checkpoint_path):
+def remote_main_v2(args, hf_token, checkpoint_path, project_name, resume):
     print("Running modal with arguments:", args)
     import subprocess, os, sys
+    from pathlib import Path
 
     from accelerate.utils import write_basic_config
     write_basic_config(mixed_precision="bf16")
@@ -90,7 +82,6 @@ def remote_main(args, hf_token, checkpoint_path):
 
     if checkpoint_path is not None:
         from huggingface_hub import hf_hub_download
-        from pathlib import Path
         checkpoint_path = Path(checkpoint_path)
         print(checkpoint_path)
         file_path = hf_hub_download(
@@ -101,6 +92,20 @@ def remote_main(args, hf_token, checkpoint_path):
         )
         print("HF Downloaded to:", file_path)
         model_volume.commit()
+
+    #auto resume
+    if not resume:
+        backup_root_dir = Path(MOUNT_DIR) / project_name / "backups"
+        if backup_root_dir.is_dir():
+            latest_backup_dir = max(
+                (p for p in backup_root_dir.iterdir() if p.is_dir() and any(p.iterdir())),
+                key=lambda p: p.stat().st_mtime, default=None
+            )
+            if latest_backup_dir is not None:
+                print(f"Auto resume from {latest_backup_dir.as_posix()}")
+                args.append("--resume")
+                args.append(latest_backup_dir.as_posix())
+                args.append("--skip_until_initial_step")
     
     # Check if we have DEBUG_TOOLKIT in env
     if os.environ.get("DEBUG_TOOLKIT", "0") == "1":
@@ -177,7 +182,6 @@ def is_probably_path(s: str) -> bool:
 @app.local_entrypoint()
 def local_main(commendtxt: str):
     global image
-
     print("local entrypoint")
 
     output_dir = "/root/output/"
@@ -187,6 +191,7 @@ def local_main(commendtxt: str):
     lycoris_preset_path = ""
     cmd_list_str = ""
     resume_folder_path = ""
+    project_name = ""
     print(commendtxt)
     if os.path.exists(commendtxt):
         with open(commendtxt, "r", encoding="utf-8") as f:
@@ -207,6 +212,8 @@ def local_main(commendtxt: str):
         elif 'dataset_config' in str(arg):
             dataset_filepath = Path(args_list[i + 1])
             args_list[i + 1] = MOUNT_DIR + "dataset_modal.toml"
+        elif 'output_name' in str(arg):
+            project_name = args_list[i + 1]
         elif '--resume' in str(arg):
             resume_folder_path = Path(args_list[i + 1])
             args_list[i + 1] = MOUNT_DIR + "resume_backup"
@@ -246,7 +253,7 @@ def local_main(commendtxt: str):
         if lycoris_preset_path != "":
             batch.put_file(lycoris_preset_path, Path(lycoris_preset_path).name)
     print("Starting remote method...")
-    remote_main.remote(args_list, hf_token = os.environ['HF_TOKEN'], checkpoint_path = str(checkpoint_filepath.as_posix()) if upload_checkpoint else None)
+    remote_main_v2.remote(args_list, os.environ['HF_TOKEN'], str(checkpoint_filepath.as_posix()) if upload_checkpoint else None, project_name, resume_folder_path != "")
 
 if __name__ == "__main__":
     import sys

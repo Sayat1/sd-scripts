@@ -90,6 +90,7 @@ class LoKrModule(torch.nn.Module):
         rank_dropout=None,
         module_dropout=None,
         factor=-1,
+        conv_factor=-1,
         use_tucker=False,
         **kwargs,
     ):
@@ -108,6 +109,7 @@ class LoKrModule(torch.nn.Module):
             self.dilation = org_module.dilation
             self.groups = org_module.groups
             self.kernel_size = kernel_size
+            factor = int(conv_factor)
 
             self.tucker = use_tucker and any(k != 1 for k in kernel_size)
 
@@ -124,11 +126,12 @@ class LoKrModule(torch.nn.Module):
             self.tucker = False
             self.conv_mode = None
             self.kernel_size = None
+            factor = int(factor)
 
         self.in_dim = in_dim
         self.out_dim = out_dim
 
-        factor = int(factor)
+        
         self.use_w2 = False
 
         # Factorize dimensions
@@ -462,6 +465,9 @@ def create_network(
     # factor for LoKr
     factor = int(kwargs.get("factor", -1))
 
+    # factor for Conv modules
+    conv_factor = int(kwargs.get("conv_factor",factor))
+
     # verbose
     verbose = kwargs.get("verbose", "false")
     if verbose is not None:
@@ -485,7 +491,7 @@ def create_network(
         rank_dropout=rank_dropout,
         module_dropout=module_dropout,
         module_class=LoKrModule,
-        module_kwargs={"factor": factor, "use_tucker": use_tucker},
+        module_kwargs={"factor": factor,"conv_factor": conv_factor, "use_tucker": use_tucker},
         conv_lora_dim=conv_lora_dim,
         conv_alpha=conv_alpha,
         train_llm_adapter=train_llm_adapter,
