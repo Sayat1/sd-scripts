@@ -11,29 +11,51 @@ import modal
 
 model_volume = modal.Volume.from_name("myvolume", create_if_missing=True, version=2)
 MOUNT_DIR = "/root/output/"  # modal_output, due to "cannot mount volume on non-empty path" requirement
+
 image = (
-        modal.Image.from_registry("nvidia/cuda:13.2.0-base-ubuntu24.04", add_python="3.11")
+        modal.Image.from_registry("nvcr.io/nvidia/pytorch:26.03-py3")
         # install required system and pip packages, more about this modal approach: https://modal.com/docs/examples/dreambooth_app
         .apt_install(
             "libgl1",
-            "libglib2.0-0",
-            "git"
+            #"libglib2.0-0",
+            #"git"
         )
         .run_commands(
-            "echo rebuild-5",
-            "pip config set global.extra-index-url https://download.pytorch.org/whl/nightly/cu132",
-            "pip install --upgrade pip",
-            "cd /root && git clone -b 'main' https://github.com/Sayat1/sd-scripts",
-        ).workdir(
-            "/root/sd-scripts/"
-        ).uv_pip_install(
-            requirements=["requirements.txt"]
-        ).uv_pip_install(
+            "echo rebuild-9",
+            "cd /root && git clone --depth=1 -b 'main' https://github.com/Sayat1/sd-scripts",
+            env={"PIP_EXTRA_INDEX_URL": "https://download.pytorch.org/whl/nightly/cu132"})
+        .workdir("/root/sd-scripts/")
+        .uv_pip_install(
             "hf_transfer",
-            "torchvision",
-            "triton"
+            requirements=["requirements.txt"],
         )
     )
+
+
+
+# image = (
+#         modal.Image.from_registry("nvidia/cuda:13.2.0-base-ubuntu24.04", add_python="3.11")
+#         # install required system and pip packages, more about this modal approach: https://modal.com/docs/examples/dreambooth_app
+#         .apt_install(
+#             "libgl1",
+#             "libglib2.0-0",
+#             "git"
+#         )
+#         .run_commands(
+#             "echo rebuild-6",
+#             "pip config set global.extra-index-url https://download.pytorch.org/whl/nightly/cu132",
+#             "pip install --upgrade pip",
+#             "cd /root && git clone --depth=1 -b 'main' https://github.com/Sayat1/sd-scripts",
+#         ).workdir(
+#             "/root/sd-scripts/"
+#         ).uv_pip_install(
+#             requirements=["requirements.txt"]
+#         ).uv_pip_install(
+#             "hf_transfer",
+#             "torchvision",
+#             "triton"
+#         )
+#     )
 
 # image = (
 #         modal.Image.from_registry("nvidia/cuda:12.9.1-base-ubuntu24.04", add_python="3.11")
@@ -66,7 +88,7 @@ app = modal.App(name="modal-training-kh",image=image, volumes={MOUNT_DIR: model_
     # more about modal GPU's: https://modal.com/docs/guide/gpu
     gpu="L40S", # gpu="H100" L40S
     # more about modal timeouts: https://modal.com/docs/guide/timeouts
-    timeout=3600*3,  # 2 hours, increase or decrease if needed,
+    timeout=3600*5,  # 2 hours, increase or decrease if needed,
 )
 def remote_main_v2(args, hf_token, checkpoint_path, project_name, resume):
     print("Running modal with arguments:", args)
