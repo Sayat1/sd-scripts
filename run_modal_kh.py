@@ -13,7 +13,7 @@ model_volume = modal.Volume.from_name("myvolume", create_if_missing=True, versio
 MOUNT_DIR = "/root/output/"  # modal_output, due to "cannot mount volume on non-empty path" requirement
 
 image = (
-        modal.Image.from_registry("nvcr.io/nvidia/pytorch:26.03-py3")
+        modal.Image.from_registry("nvcr.io/nvidia/pytorch:25.03-py3")
         # install required system and pip packages, more about this modal approach: https://modal.com/docs/examples/dreambooth_app
         .apt_install(
             "libgl1",
@@ -21,7 +21,7 @@ image = (
             #"git"
         )
         .run_commands(
-            "echo rebuild-9",
+            "echo rebuild-10",
             "cd /root && git clone --depth=1 -b 'main' https://github.com/Sayat1/sd-scripts",
             env={"PIP_EXTRA_INDEX_URL": "https://download.pytorch.org/whl/nightly/cu132"})
         .workdir("/root/sd-scripts/")
@@ -101,6 +101,7 @@ def remote_main_v2(args, hf_token, checkpoint_path, project_name, resume):
     sys.path.insert(0, "/root/sd-scripts")
     os.environ['DISABLE_TELEMETRY'] = 'YES'
     os.environ['MODAL_ENV'] = "1"
+    os.environ['HF_TOKEN'] = hf_token
 
     if checkpoint_path is not None:
         from huggingface_hub import hf_hub_download
@@ -237,8 +238,9 @@ def local_main(commendtxt: str):
         elif 'output_name' in str(arg):
             project_name = args_list[i + 1]
         elif '--resume' in str(arg):
-            resume_folder_path = Path(args_list[i + 1])
-            args_list[i + 1] = MOUNT_DIR + "resume_backup"
+            resume_local_path = Path(args_list[i + 1])
+            resume_remote_path = '/'.join(resume_local_path.parts[2:])
+            args_list[i + 1] = MOUNT_DIR + resume_remote_path
         elif 'preset=' in str(arg):
             preset_path = arg[7:]
             if is_probably_path(preset_path):
@@ -270,8 +272,8 @@ def local_main(commendtxt: str):
         
         for index, dataset_dir in local_dataset_dirs_dict.items():
             batch.put_directory(dataset_dir, "dataset/" + str(index))
-        if resume_folder_path != "":
-            batch.put_directory(resume_folder_path, "resume_backup")
+        if resume_local_path != "":
+            batch.put_directory(resume_local_path, resume_remote_path)
         if lycoris_preset_path != "":
             batch.put_file(lycoris_preset_path, Path(lycoris_preset_path).name)
     print("Starting remote method...")
