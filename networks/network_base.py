@@ -262,7 +262,7 @@ class AdditionalNetwork(torch.nn.Module):
                                 for reg, d in self.reg_kwargs.items():
                                     if re.fullmatch(reg, original_name):
                                         local_module_kwargs.update(d)
-                                        logger.info(f"Module {original_name} matched with regex '{reg}' -> kwargs: {module_kwargs}")
+                                        logger.info(f"Module {original_name} matched with regex '{reg}' -> kwargs: {local_module_kwargs}")
 
                             if dim is None or dim == 0:
                                 if is_linear or is_conv2d_1x1:
