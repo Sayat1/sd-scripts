@@ -225,6 +225,7 @@ class AdditionalNetwork(torch.nn.Module):
                         if is_linear or is_conv2d:
                             original_name = (name + "." if name else "") + child_name
                             lora_name = f"{prefix}.{original_name}".replace(".", "_")
+                            local_module_kwargs = module_kwargs.copy()
 
                             # exclude/include filter
                             excluded = any(pattern.fullmatch(original_name) for pattern in exclude_re_patterns)
@@ -260,7 +261,7 @@ class AdditionalNetwork(torch.nn.Module):
                             if self.reg_kwargs is not None:
                                 for reg, d in self.reg_kwargs.items():
                                     if re.fullmatch(reg, original_name):
-                                        module_kwargs.update(d)
+                                        local_module_kwargs.update(d)
                                         logger.info(f"Module {original_name} matched with regex '{reg}' -> kwargs: {module_kwargs}")
 
                             if dim is None or dim == 0:
@@ -277,7 +278,7 @@ class AdditionalNetwork(torch.nn.Module):
                                 dropout=dropout,
                                 rank_dropout=rank_dropout,
                                 module_dropout=module_dropout,
-                                **module_kwargs,
+                                **local_module_kwargs,
                             )
                             lora.original_name = original_name
                             lora.parent_name = module.__class__.__name__
