@@ -213,7 +213,7 @@ def local_main(commendtxt: str):
     dataset_filepath = ""
     lycoris_preset_path = ""
     cmd_list_str = ""
-    resume_folder_path = ""
+    resume_local_path = ""
     project_name = ""
     print(commendtxt)
     if os.path.exists(commendtxt):
@@ -277,7 +277,7 @@ def local_main(commendtxt: str):
         if lycoris_preset_path != "":
             batch.put_file(lycoris_preset_path, Path(lycoris_preset_path).name)
     print("Starting remote method...")
-    remote_main_v2.remote(args_list, os.environ['HF_TOKEN'], str(checkpoint_filepath.as_posix()) if upload_checkpoint else None, project_name, resume_folder_path != "")
+    remote_main_v2.remote(args_list, os.environ['HF_TOKEN'], str(checkpoint_filepath.as_posix()) if upload_checkpoint else None, project_name, resume_local_path != "")
 
 if __name__ == "__main__":
     import sys

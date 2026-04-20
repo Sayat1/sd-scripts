@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .network_base import ArchConfig, AdditionalNetwork, detect_arch_config, _parse_kv_pairs
+from .network_base import ArchConfig, AdditionalNetwork, detect_arch_config, _parse_kv_pairs, _parse_kv_kwargs, _parse_kv_dims
 from library.utils import setup_logging
 
 setup_logging()
@@ -90,7 +90,6 @@ class LoKrModule(torch.nn.Module):
         rank_dropout=None,
         module_dropout=None,
         factor=-1,
-        conv_factor=-1,
         use_tucker=False,
         **kwargs,
     ):
@@ -109,8 +108,6 @@ class LoKrModule(torch.nn.Module):
             self.dilation = org_module.dilation
             self.groups = org_module.groups
             self.kernel_size = kernel_size
-            factor = int(conv_factor)
-
             self.tucker = use_tucker and any(k != 1 for k in kernel_size)
 
             if kernel_size == (1, 1):
@@ -126,14 +123,14 @@ class LoKrModule(torch.nn.Module):
             self.tucker = False
             self.conv_mode = None
             self.kernel_size = None
-            factor = int(factor)
+
+        factor = int(factor)            
 
         self.in_dim = in_dim
         self.out_dim = out_dim
 
-        
         self.use_w2 = False
-
+        
         # Factorize dimensions
         in_m, in_n = factorization(in_dim, factor)
         out_l, out_k = factorization(out_dim, factor)
@@ -465,9 +462,6 @@ def create_network(
     # factor for LoKr
     factor = int(kwargs.get("factor", -1))
 
-    # factor for Conv modules
-    conv_factor = int(kwargs.get("conv_factor",factor))
-
     # verbose
     verbose = kwargs.get("verbose", "false")
     if verbose is not None:
@@ -478,7 +472,10 @@ def create_network(
     reg_lrs = _parse_kv_pairs(network_reg_lrs, is_int=False) if network_reg_lrs is not None else None
 
     network_reg_dims = kwargs.get("network_reg_dims", None)
-    reg_dims = _parse_kv_pairs(network_reg_dims, is_int=True) if network_reg_dims is not None else None
+    reg_dims = _parse_kv_dims(network_reg_dims) if network_reg_dims is not None else None
+
+    network_reg_kwargs = kwargs.get("network_reg_kwargs", None)
+    reg_kwargs = _parse_kv_kwargs(network_reg_kwargs) if network_reg_kwargs is not None else None
 
     network = AdditionalNetwork(
         text_encoders,
@@ -491,7 +488,7 @@ def create_network(
         rank_dropout=rank_dropout,
         module_dropout=module_dropout,
         module_class=LoKrModule,
-        module_kwargs={"factor": factor,"conv_factor": conv_factor, "use_tucker": use_tucker},
+        module_kwargs={"factor": factor, "use_tucker": use_tucker},
         conv_lora_dim=conv_lora_dim,
         conv_alpha=conv_alpha,
         train_llm_adapter=train_llm_adapter,
@@ -499,6 +496,7 @@ def create_network(
         include_patterns=include_patterns,
         reg_dims=reg_dims,
         reg_lrs=reg_lrs,
+        reg_kwargs=reg_kwargs,
         verbose=verbose,
     )
 
