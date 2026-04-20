@@ -21,14 +21,14 @@ image = (
             #"git"
         )
         .run_commands(
-            "echo rebuild-10",
+            "echo rebuild-13",
             "cd /root && git clone --depth=1 -b 'main' https://github.com/Sayat1/sd-scripts",
             env={"PIP_EXTRA_INDEX_URL": "https://download.pytorch.org/whl/nightly/cu132"})
         .workdir("/root/sd-scripts/")
         .uv_pip_install(
             "hf_transfer",
-            requirements=["requirements.txt"],
-        )
+            requirements=["requirements.txt"])
+        .env({"HF_XET_HIGH_PERFORMANCE": "1"})
     )
 
 
@@ -81,14 +81,14 @@ image = (
 #     )
 
 # create the Modal app with the necessary mounts and volumes
-app = modal.App(name="modal-training-kh",image=image, volumes={MOUNT_DIR: model_volume})
-
+app = modal.App(name="modal-training-kh")
 @app.function(
     # request a GPU with at least 24GB VRAM
     # more about modal GPU's: https://modal.com/docs/guide/gpu
     gpu="L40S", # gpu="H100" L40S
     # more about modal timeouts: https://modal.com/docs/guide/timeouts
     timeout=3600*5,  # 2 hours, increase or decrease if needed,
+    image=image, volumes={MOUNT_DIR: model_volume}
 )
 def remote_main_v2(args, hf_token, checkpoint_path, project_name, resume):
     print("Running modal with arguments:", args)
@@ -140,23 +140,23 @@ def remote_main_v2(args, hf_token, checkpoint_path, project_name, resume):
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
 
-    def _exec_subprocess(cmd: list[str]):
-        """Executes subprocess and prints log to terminal while subprocess is running."""
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            encoding="utf-8",
-            errors="replace",
-            env=env
-        )
-        with process.stdout as pipe:
-            for line in iter(pipe.readline, b""):
-                line_str = line
-                print(f"{line_str}", end="")
+    # def _exec_subprocess(cmd: list[str]):
+    #     """Executes subprocess and prints log to terminal while subprocess is running."""
+    #     process = subprocess.Popen(
+    #         cmd,
+    #         stdout=subprocess.PIPE,
+    #         stderr=subprocess.STDOUT,
+    #         encoding="utf-8",
+    #         errors="replace",
+    #         env=env
+    #     )
+    #     with process.stdout as pipe:
+    #         for line in iter(pipe.readline, b""):
+    #             line_str = line
+    #             print(f"{line_str}", end="")
 
-        if exitcode := process.wait() != 0:
-            raise subprocess.CalledProcessError(exitcode, "\n".join(cmd))
+    #     if exitcode := process.wait() != 0:
+    #         raise subprocess.CalledProcessError(exitcode, "\n".join(cmd))
         
     print("launching dreambooth training script")
     os.chdir("/root/sd-scripts")
