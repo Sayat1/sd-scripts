@@ -3,7 +3,6 @@
 # https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # https://github.com/cloneofsimo/lora/blob/master/lora_diffusion/lora.py
 
-import ast
 import math
 import os
 from typing import Dict, List, Optional, Tuple, Type, Union
@@ -14,8 +13,6 @@ import torch
 import re
 from library.utils import setup_logging
 from library.sdxl_original_unet import SdxlUNet2DConditionModel
-from .network_base import ArchConfig, AdditionalNetwork, detect_arch_config, _parse_kv_pairs, _parse_kv_kwargs, _parse_kv_dims
-
 
 setup_logging()
 import logging
@@ -40,7 +37,6 @@ class LoRAModule(torch.nn.Module):
         dropout=None,
         rank_dropout=None,
         module_dropout=None,
-        **kwargs,
     ):
         """if alpha == 0 or None, alpha is rank (no scaling)."""
         super().__init__()
@@ -427,40 +423,49 @@ def create_network(
     neuron_dropout: Optional[float] = None,
     **kwargs,
 ):
+    # if unet is an instance of SdxlUNet2DConditionModel or subclass, set is_sdxl to True
+    is_sdxl = unet is not None and issubclass(unet.__class__, SdxlUNet2DConditionModel)
+
     if network_dim is None:
-        network_dim = 4
+        network_dim = 4  # default
     if network_alpha is None:
         network_alpha = 1.0
 
-    # handle text_encoder as list
-    text_encoders = text_encoder if isinstance(text_encoder, list) else [text_encoder]
+    # extract dim/alpha for conv2d, and block dim
+    conv_dim = kwargs.get("conv_dim", None)
+    conv_alpha = kwargs.get("conv_alpha", None)
+    if conv_dim is not None:
+        conv_dim = int(conv_dim)
+        if conv_alpha is None:
+            conv_alpha = 1.0
+        else:
+            conv_alpha = float(conv_alpha)
+    simple_conv = kwargs.get("simple_conv", False)
 
-    # detect architecture
-    arch_config = detect_arch_config(unet, text_encoders)
 
-    # train LLM adapter
-    train_llm_adapter = kwargs.get("train_llm_adapter", "false")
-    if train_llm_adapter is not None:
-        train_llm_adapter = True if str(train_llm_adapter).lower() == "true" else False
+    # block dim/alpha/lr
+    block_dims = kwargs.get("block_dims", None)
+    block_lr_weight = parse_block_lr_kwargs(is_sdxl, kwargs)
 
-    # exclude patterns
-    exclude_patterns = kwargs.get("exclude_patterns", None)
-    if exclude_patterns is None:
-        exclude_patterns = []
+    # 以上のいずれかに指定があればblockごとのdim(rank)を有効にする
+    if block_dims is not None or block_lr_weight is not None:
+        block_alphas = kwargs.get("block_alphas", None)
+        conv_block_dims = kwargs.get("conv_block_dims", None)
+        conv_block_alphas = kwargs.get("conv_block_alphas", None)
+
+        block_dims, block_alphas, conv_block_dims, conv_block_alphas = get_block_dims_and_alphas(
+            is_sdxl, block_dims, block_alphas, network_dim, network_alpha, conv_block_dims, conv_block_alphas, conv_dim, conv_alpha
+        )
+
+        # remove block dim/alpha without learning rate
+        block_dims, block_alphas, conv_block_dims, conv_block_alphas = remove_block_dims_and_alphas(
+            is_sdxl, block_dims, block_alphas, conv_block_dims, conv_block_alphas, block_lr_weight
+        )
+
     else:
-        exclude_patterns = ast.literal_eval(exclude_patterns)
-        if not isinstance(exclude_patterns, list):
-            exclude_patterns = [exclude_patterns]
-
-    # add default exclude patterns from arch config
-    exclude_patterns.extend(arch_config.default_excludes)
-
-    # include patterns
-    include_patterns = kwargs.get("include_patterns", None)
-    if include_patterns is not None:
-        include_patterns = ast.literal_eval(include_patterns)
-        if not isinstance(include_patterns, list):
-            include_patterns = [include_patterns]
+        block_alphas = None
+        conv_block_dims = None
+        conv_block_alphas = None
 
     # rank/module dropout
     rank_dropout = kwargs.get("rank_dropout", None)
@@ -470,55 +475,27 @@ def create_network(
     if module_dropout is not None:
         module_dropout = float(module_dropout)
 
-    # conv dim/alpha for Conv2d 3x3
-    conv_lora_dim = kwargs.get("conv_dim", None)
-    conv_alpha = kwargs.get("conv_alpha", None)
-    if conv_lora_dim is not None:
-        conv_lora_dim = int(conv_lora_dim)
-        if conv_alpha is None:
-            conv_alpha = 1.0
-        else:
-            conv_alpha = float(conv_alpha)
-
-    # verbose
-    verbose = kwargs.get("verbose", "false")
-    if verbose is not None:
-        verbose = True if str(verbose).lower() == "true" else False
-
-    # regex-specific learning rates / dimensions
-    network_reg_lrs = kwargs.get("network_reg_lrs", None)
-    reg_lrs = _parse_kv_pairs(network_reg_lrs, is_int=False) if network_reg_lrs is not None else None
-
-    network_reg_dims = kwargs.get("network_reg_dims", None)
-    reg_dims = _parse_kv_dims(network_reg_dims) if network_reg_dims is not None else None
-
-    network_reg_kwargs = kwargs.get("network_reg_kwargs", None)
-    reg_kwargs = _parse_kv_kwargs(network_reg_kwargs) if network_reg_kwargs is not None else None
-
-    network = AdditionalNetwork(
-        text_encoders,
+    # すごく引数が多いな ( ^ω^)･･･
+    network = LoRANetwork(
+        text_encoder,
         unet,
-        arch_config=arch_config,
         multiplier=multiplier,
         lora_dim=network_dim,
         alpha=network_alpha,
         dropout=neuron_dropout,
         rank_dropout=rank_dropout,
         module_dropout=module_dropout,
-        module_class=LoRAModule,
-        module_kwargs=kwargs,
-        conv_lora_dim=conv_lora_dim,
+        conv_lora_dim=conv_dim,
         conv_alpha=conv_alpha,
-        train_llm_adapter=train_llm_adapter,
-        exclude_patterns=exclude_patterns,
-        include_patterns=include_patterns,
-        reg_dims=reg_dims,
-        reg_lrs=reg_lrs,
-        reg_kwargs=reg_kwargs,
-        verbose=verbose,
+        block_dims=block_dims,
+        block_alphas=block_alphas,
+        conv_block_dims=conv_block_dims,
+        conv_block_alphas=conv_block_alphas,
+        simple_conv=simple_conv,
+        varbose=True,
+        is_sdxl=is_sdxl,
     )
 
-    # LoRA+ support
     loraplus_lr_ratio = kwargs.get("loraplus_lr_ratio", None)
     loraplus_unet_lr_ratio = kwargs.get("loraplus_unet_lr_ratio", None)
     loraplus_text_encoder_lr_ratio = kwargs.get("loraplus_text_encoder_lr_ratio", None)
@@ -527,6 +504,9 @@ def create_network(
     loraplus_text_encoder_lr_ratio = float(loraplus_text_encoder_lr_ratio) if loraplus_text_encoder_lr_ratio is not None else None
     if loraplus_lr_ratio is not None or loraplus_unet_lr_ratio is not None or loraplus_text_encoder_lr_ratio is not None:
         network.set_loraplus_lr_ratio(loraplus_lr_ratio, loraplus_unet_lr_ratio, loraplus_text_encoder_lr_ratio)
+
+    if block_lr_weight is not None:
+        network.set_block_lr_weight(block_lr_weight)
 
     return network
 

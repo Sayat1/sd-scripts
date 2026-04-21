@@ -89,11 +89,18 @@ class LoKrModule(torch.nn.Module):
         dropout=None,
         rank_dropout=None,
         module_dropout=None,
-        factor=-1,
-        use_tucker=False,
         **kwargs,
     ):
         super().__init__()
+
+        # Tucker decomposition for Conv2d 3x3
+        use_tucker = kwargs.get("use_tucker", "false")
+        if use_tucker is not None:
+            use_tucker = True if str(use_tucker).lower() == "true" else False
+
+        # factor for LoKr
+        factor = int(kwargs.get("factor", -1))
+
         self.lora_name = lora_name
         self.lora_dim = lora_dim
 
@@ -122,9 +129,7 @@ class LoKrModule(torch.nn.Module):
             self.is_conv = False
             self.tucker = False
             self.conv_mode = None
-            self.kernel_size = None
-
-        factor = int(factor)            
+            self.kernel_size = None          
 
         self.in_dim = in_dim
         self.out_dim = out_dim
@@ -454,14 +459,6 @@ def create_network(
         else:
             conv_alpha = float(conv_alpha)
 
-    # Tucker decomposition for Conv2d 3x3
-    use_tucker = kwargs.get("use_tucker", "false")
-    if use_tucker is not None:
-        use_tucker = True if str(use_tucker).lower() == "true" else False
-
-    # factor for LoKr
-    factor = int(kwargs.get("factor", -1))
-
     # verbose
     verbose = kwargs.get("verbose", "false")
     if verbose is not None:
@@ -488,7 +485,7 @@ def create_network(
         rank_dropout=rank_dropout,
         module_dropout=module_dropout,
         module_class=LoKrModule,
-        module_kwargs={"factor": factor, "use_tucker": use_tucker},
+        module_kwargs=kwargs,
         conv_lora_dim=conv_lora_dim,
         conv_alpha=conv_alpha,
         train_llm_adapter=train_llm_adapter,
