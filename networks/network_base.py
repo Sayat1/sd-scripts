@@ -269,6 +269,9 @@ class AdditionalNetwork(torch.nn.Module):
                                     skipped.append(lora_name)
                                 continue
 
+                            print("kwargs")
+                            print(local_module_kwargs)
+
                             lora = module_class(
                                 lora_name,
                                 child_module,

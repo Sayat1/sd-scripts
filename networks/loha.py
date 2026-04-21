@@ -419,12 +419,12 @@ def create_network(
     arch_config = detect_arch_config(unet, text_encoders)
 
     # train LLM adapter
-    train_llm_adapter = kwargs.get("train_llm_adapter", "false")
+    train_llm_adapter = kwargs.pop("train_llm_adapter", "false")
     if train_llm_adapter is not None:
         train_llm_adapter = True if str(train_llm_adapter).lower() == "true" else False
 
     # exclude patterns
-    exclude_patterns = kwargs.get("exclude_patterns", None)
+    exclude_patterns = kwargs.pop("exclude_patterns", None)
     if exclude_patterns is None:
         exclude_patterns = []
     else:
@@ -436,23 +436,27 @@ def create_network(
     exclude_patterns.extend(arch_config.default_excludes)
 
     # include patterns
-    include_patterns = kwargs.get("include_patterns", None)
+    include_patterns = kwargs.pop("include_patterns", None)
     if include_patterns is not None:
         include_patterns = ast.literal_eval(include_patterns)
         if not isinstance(include_patterns, list):
             include_patterns = [include_patterns]
 
     # rank/module dropout
-    rank_dropout = kwargs.get("rank_dropout", None)
+    dropout = neuron_dropout
+    dropout = kwargs.pop("dropout", None)
+    if dropout is not None:
+        dropout = float(rank_dropout)
+    rank_dropout = kwargs.pop("rank_dropout", None)
     if rank_dropout is not None:
         rank_dropout = float(rank_dropout)
-    module_dropout = kwargs.get("module_dropout", None)
+    module_dropout = kwargs.pop("module_dropout", None)
     if module_dropout is not None:
         module_dropout = float(module_dropout)
 
     # conv dim/alpha for Conv2d 3x3
-    conv_lora_dim = kwargs.get("conv_dim", None)
-    conv_alpha = kwargs.get("conv_alpha", None)
+    conv_lora_dim = kwargs.pop("conv_dim", None)
+    conv_alpha = kwargs.pop("conv_alpha", None)
     if conv_lora_dim is not None:
         conv_lora_dim = int(conv_lora_dim)
         if conv_alpha is None:
@@ -461,20 +465,20 @@ def create_network(
             conv_alpha = float(conv_alpha)
 
     # Tucker decomposition for Conv2d 3x3
-    use_tucker = kwargs.get("use_tucker", "false")
+    use_tucker = kwargs.pop("use_tucker", "false")
     if use_tucker is not None:
         use_tucker = True if str(use_tucker).lower() == "true" else False
 
     # verbose
-    verbose = kwargs.get("verbose", "false")
+    verbose = kwargs.pop("verbose", "false")
     if verbose is not None:
         verbose = True if str(verbose).lower() == "true" else False
 
     # regex-specific learning rates / dimensions
-    network_reg_lrs = kwargs.get("network_reg_lrs", None)
+    network_reg_lrs = kwargs.pop("network_reg_lrs", None)
     reg_lrs = _parse_kv_pairs(network_reg_lrs, is_int=False) if network_reg_lrs is not None else None
 
-    network_reg_dims = kwargs.get("network_reg_dims", None)
+    network_reg_dims = kwargs.pop("network_reg_dims", None)
     reg_dims = _parse_kv_pairs(network_reg_dims, is_int=True) if network_reg_dims is not None else None
 
     network = AdditionalNetwork(
