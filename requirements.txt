@@ -10,7 +10,8 @@ bitsandbytes
 lion-pytorch==0.2.3
 schedulefree==1.4
 pytorch-optimizer
-prodigy-plus-schedule-free==2.0.1
+#prodigy-plus-schedule-free==2.0.1
+git+https://github.com/Sayat1/prodigy-plus-schedule-free.git@2.0.0
 prodigyopt==1.1.2
 tensorboard
 safetensors==0.4.5
