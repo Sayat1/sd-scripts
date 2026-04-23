@@ -411,7 +411,7 @@ class AdditionalNetwork(torch.nn.Module):
         logger.info(f"LoRA+ UNet LR Ratio: {self.loraplus_unet_lr_ratio or self.loraplus_lr_ratio}")
         logger.info(f"LoRA+ Text Encoder LR Ratio: {self.loraplus_text_encoder_lr_ratio or self.loraplus_lr_ratio}")
 
-    def prepare_optimizer_params_with_multiple_te_lrs(self, text_encoder_lr, unet_lr, default_lr, split_conv=False):
+    def prepare_optimizer_params_with_multiple_te_lrs(self, text_encoder_lr, unet_lr, default_lr, split_te=False, split_conv=False):
         if text_encoder_lr is None or (isinstance(text_encoder_lr, list) and len(text_encoder_lr) == 0):
             text_encoder_lr = [default_lr]
         elif isinstance(text_encoder_lr, float) or isinstance(text_encoder_lr, int):
@@ -493,14 +493,25 @@ class AdditionalNetwork(torch.nn.Module):
         if self.text_encoder_loras:
             loraplus_ratio = self.loraplus_text_encoder_lr_ratio or self.loraplus_lr_ratio
             # Group TE loras by prefix
-            for te_idx, te_prefix in enumerate(self.arch_config.te_prefixes):
-                te_loras = [lora for lora in self.text_encoder_loras if lora.lora_name.startswith(te_prefix)]
+            if split_te:
+                for te_idx, te_prefix in enumerate(self.arch_config.te_prefixes):
+                    te_loras = [lora for lora in self.text_encoder_loras if lora.lora_name.startswith(te_prefix)]
+                    if len(te_loras) > 0:
+                        te_lr = text_encoder_lr[te_idx] if te_idx < len(text_encoder_lr) else text_encoder_lr[0]
+                        logger.info(f"Text Encoder {te_idx+1} ({te_prefix}): {len(te_loras)} modules, LR {te_lr}")
+                        params, descriptions = assemble_params(te_loras, te_lr, loraplus_ratio)
+                        all_params.extend(params)
+                        lr_descriptions.extend([f"textencoder {te_idx+1}" + (" " + d if d else "") for d in descriptions])
+            else:
+                te_loras = []
+                for te_idx, te_prefix in enumerate(self.arch_config.te_prefixes):
+                    te_loras.extend([lora for lora in self.text_encoder_loras if lora.lora_name.startswith(te_prefix)])
                 if len(te_loras) > 0:
-                    te_lr = text_encoder_lr[te_idx] if te_idx < len(text_encoder_lr) else text_encoder_lr[0]
-                    logger.info(f"Text Encoder {te_idx+1} ({te_prefix}): {len(te_loras)} modules, LR {te_lr}")
+                    te_lr = text_encoder_lr[0]
+                    logger.info(f"Text Encoder): {len(te_loras)} modules, LR {te_lr}")
                     params, descriptions = assemble_params(te_loras, te_lr, loraplus_ratio)
                     all_params.extend(params)
-                    lr_descriptions.extend([f"textencoder {te_idx+1}" + (" " + d if d else "") for d in descriptions])
+                    lr_descriptions.extend([f"textencoder" + (" " + d if d else "") for d in descriptions])
 
         if self.unet_loras:
             if split_conv:

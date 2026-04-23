@@ -4519,8 +4519,13 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
     )
 
     parser.add_argument(
-        "--split_conv", action="store_true", help="training parameter 그룹에서 Transformers2DModel과 그 외 분리. Prodigy같은 그룹별 맞춤 optimizers를 위해. (Lora, 그리고 다른 라이브러리 네트워크에서 작동안함)"
+        "--split_conv", action="store_true", help="training parameter 그룹에서 Transformers2DModel과 그 외 분리. Prodigy같은 그룹별 맞춤 optimizers를 위해. 다른 네트워크 라이브러리 (lycoris)에서 작동 안함"
     )
+
+    parser.add_argument(
+        "--split_te", action="store_true", help="TE1과 TE2 그룹 분리. Prodigy같은 그룹별 맞춤 optimizers를 위해. 다른 네트워크 라이브러리 (lycoris)에서 작동 안함"
+    )
+
 
     parser.add_argument(
         "--config_file",

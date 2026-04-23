@@ -779,7 +779,7 @@ class NetworkTrainer:
                 text_encoder_lr = None if len(args.text_encoder_lr) == 0 else args.text_encoder_lr[0]
         try:
             if support_multiple_lrs:
-                results = network.prepare_optimizer_params_with_multiple_te_lrs(text_encoder_lr, args.unet_lr, args.learning_rate, split_conv=args.split_conv)
+                results = network.prepare_optimizer_params_with_multiple_te_lrs(text_encoder_lr, args.unet_lr, args.learning_rate, split_te=args.split_te, split_conv=args.split_conv)
             else:
                 results = network.prepare_optimizer_params(text_encoder_lr, args.unet_lr, args.learning_rate)
             if type(results) is tuple:
