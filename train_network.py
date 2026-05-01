@@ -727,7 +727,7 @@ class NetworkTrainer:
                 args.network_dim,
                 args.network_alpha,
                 vae,
-                text_encoders,
+                [t_enc if flag else None for t_enc, flag in zip(text_encoders, self.get_text_encoders_train_flags(args, text_encoders))],
                 unet,
                 neuron_dropout=args.network_dropout,
                 **net_kwargs,
