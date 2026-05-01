@@ -212,7 +212,16 @@ class NetworkTrainer:
 
     # returns a list of bool values indicating whether each text encoder should be trained
     def get_text_encoders_train_flags(self, args, text_encoders):
-        return [True] * len(text_encoders) if self.is_train_text_encoder(args) else [False] * len(text_encoders)
+        if self.is_train_text_encoder(args):
+            te_lr = args.text_encoder_lr
+            te_lr = [te_lr] * len(text_encoders) if isinstance(te_lr, (int, float)) else te_lr
+            if len(text_encoders) > 1:
+                return [tlr != 0.0 for tlr in te_lr]
+            else:
+                return [te_lr != 0.0]
+        else:
+            return [False] * len(text_encoders)
+        #return [True] * len(text_encoders) if self.is_train_text_encoder(args) else [False] * len(text_encoders)
 
     def is_train_text_encoder(self, args):
         return not args.network_train_unet_only
@@ -707,7 +716,7 @@ class NetworkTrainer:
 
         # if a new network is added in future, add if ~ then blocks for each network (;'∀')
         if args.dim_from_weights:
-            network, _ = network_module.create_network_from_weights(1, args.network_weights, vae, text_encoder, unet, **net_kwargs)
+            network, _ = network_module.create_network_from_weights(1, args.network_weights, vae, text_encoders, unet, **net_kwargs)
         else:
             if "dropout" not in net_kwargs:
                 # workaround for LyCORIS (;^ω^)
@@ -718,7 +727,7 @@ class NetworkTrainer:
                 args.network_dim,
                 args.network_alpha,
                 vae,
-                text_encoder,
+                text_encoders,
                 unet,
                 neuron_dropout=args.network_dropout,
                 **net_kwargs,
