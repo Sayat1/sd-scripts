@@ -20,6 +20,7 @@ class Automagic(torch.optim.Optimizer):
         paramiter_swapping_factor=0.1,
         use_adopt=False,
         beta1=0.9,
+        use_orthograd=False,
         ):
         self.lr = lr
         if self.lr > 1e-3:
@@ -38,6 +39,7 @@ class Automagic(torch.optim.Optimizer):
             "beta2": beta2,
             "weight_decay": weight_decay,
             "use_adopt": use_adopt,
+            "use_orthograd": use_orthograd,
         }
         super().__init__(params, defaults)
 
@@ -253,11 +255,11 @@ class Automagic(torch.optim.Optimizer):
                     update = state["exp_avg"].clone()
 
                     if use_atan2:
-                        if factored:
-                            de_nom = de_nom_inv.reciprocal()
-                        else:
-                            de_nom = state["exp_avg_sq"].sqrt()
-                        update = torch.atan2(update, de_nom)
+                        # a = 1 / arctan(1) = ~1.273. This clips most updates to ~2.0
+                        # See: https://arxiv.org/abs/2407.05872
+                        a = 1.2732395
+                        # ADOPT already has a normalized update, so we use 1.0 as the denominator
+                        update = torch.atan2(update, torch.ones_like(update)).mul_(a)
                 else:
                     update_sq = (grad**2) + local_eps
                     if factored:
@@ -274,7 +276,8 @@ class Automagic(torch.optim.Optimizer):
                             exp_avg_sq_row, exp_avg_sq_col)
                         
                         if use_atan2:
-                            update = torch.atan2(grad, de_nom_inv.reciprocal())
+                            a = 1.2732395
+                            update = torch.atan2(grad, de_nom_inv.reciprocal()).mul_(a)
                         else:
                             update = grad * de_nom_inv
                     else:
@@ -283,12 +286,17 @@ class Automagic(torch.optim.Optimizer):
                         exp_avg_sq.mul_(beta2).add_(update_sq, alpha=(1.0 - beta2))
                         
                         if use_atan2:
-                            update = torch.atan2(grad, exp_avg_sq.sqrt())
+                            a = 1.2732395
+                            update = torch.atan2(grad, exp_avg_sq.sqrt()).mul_(a)
                         else:
                             update = grad * exp_avg_sq.rsqrt()
 
-                update.div_(
-                    (self._rms(update) / group["clip_threshold"]).clamp_(min=1.0))
+                if group.get("use_orthograd", False):
+                    self.apply_orthogonal_gradients(p)
+
+                if group["clip_threshold"] > 0:
+                    update.div_(
+                        (self._rms(update) / group["clip_threshold"]).clamp_(min=1.0))
 
                 # Ensure state is properly initialized
                 if 'last_polarity' not in state or 'lr_mask' not in state:
@@ -347,6 +355,32 @@ class Automagic(torch.optim.Optimizer):
 
         return loss
     
+    @torch.no_grad()
+    def apply_orthogonal_gradients(self, p, eps: float = 1e-16):
+        if p.grad is None or p.grad.is_sparse or torch.is_complex(p):
+            return
+
+        w = p.view(-1)
+        g = p.grad.view(-1)
+        
+        # Ensure float32 for dot products to avoid precision issues
+        w_f32 = w.to(torch.float32)
+        g_f32 = g.to(torch.float32)
+
+        w_dot_w = torch.dot(w_f32, w_f32)
+        if w_dot_w <= 1e-30:
+            return
+
+        proj = torch.dot(w_f32, g_f32).div_(w_dot_w.add_(eps))
+        g_ortho = g_f32.sub(w_f32, alpha=proj)
+        
+        g_norm = g_f32.norm(2)
+        g_ortho_norm = g_ortho.norm(2)
+        
+        g_ortho_scaled = g_ortho.mul_(g_norm.div_(g_ortho_norm.add_(eps)))
+
+        p.grad.copy_(g_ortho_scaled.view_as(p.grad))
+
     def initialize_state(self, p):
         state = self.state[p]
         state["step"] = 0
