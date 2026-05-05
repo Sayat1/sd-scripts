@@ -218,11 +218,15 @@ class Automagic(torch.optim.Optimizer):
                 beta1 = group["beta1"]
                 beta2 = group["beta2"]
                 eps = group["eps"]
+
+                use_atan2 = eps is None
                 if isinstance(eps, tuple) or isinstance(eps, list):
                     eps = eps[0]
 
+                local_eps = eps if eps is not None else 1e-30
+
                 if self.use_adopt:
-                    update_sq = grad**2 + eps
+                    update_sq = grad**2 + local_eps
                     if state["step"] == 1:
                         # ADOPT step 1: only update exp_avg_sq
                         if factored:
@@ -247,8 +251,15 @@ class Automagic(torch.optim.Optimizer):
 
                     state["exp_avg"].lerp_(normed_grad, 1.0 - beta1)
                     update = state["exp_avg"].clone()
+
+                    if use_atan2:
+                        if factored:
+                            de_nom = de_nom_inv.reciprocal()
+                        else:
+                            de_nom = state["exp_avg_sq"].sqrt()
+                        update = torch.atan2(update, de_nom)
                 else:
-                    update_sq = (grad**2) + eps
+                    update_sq = (grad**2) + local_eps
                     if factored:
                         exp_avg_sq_row = state["exp_avg_sq_row"]
                         exp_avg_sq_col = state["exp_avg_sq_col"]
@@ -259,14 +270,22 @@ class Automagic(torch.optim.Optimizer):
                             update_sq.mean(dim=-2), alpha=(1.0 - beta2))
 
                         # Approximation of exponential moving average of square of gradient
-                        update = self._approx_sq_grad(
+                        de_nom_inv = self._approx_sq_grad(
                             exp_avg_sq_row, exp_avg_sq_col)
-                        update.mul_(grad)
+                        
+                        if use_atan2:
+                            update = torch.atan2(grad, de_nom_inv.reciprocal())
+                        else:
+                            update = grad * de_nom_inv
                     else:
                         exp_avg_sq = state["exp_avg_sq"]
 
                         exp_avg_sq.mul_(beta2).add_(update_sq, alpha=(1.0 - beta2))
-                        update = exp_avg_sq.rsqrt().mul_(grad)
+                        
+                        if use_atan2:
+                            update = torch.atan2(grad, exp_avg_sq.sqrt())
+                        else:
+                            update = grad * exp_avg_sq.rsqrt()
 
                 update.div_(
                     (self._rms(update) / group["clip_threshold"]).clamp_(min=1.0))
