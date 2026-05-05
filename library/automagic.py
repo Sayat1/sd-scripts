@@ -223,7 +223,7 @@ class Automagic(torch.optim.Optimizer):
                 if isinstance(eps, tuple) or isinstance(eps, list):
                     eps = eps[0]
 
-                local_eps = eps if eps is not None else 1e-16
+                local_eps = eps if eps is not None else 1e-8
 
                 if self.use_adopt:
                     update_sq = grad**2 + local_eps
