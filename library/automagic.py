@@ -212,7 +212,7 @@ class Automagic(torch.optim.Optimizer):
                 if "step" not in state:
                     state["step"] = 0
                 state["step"] += 1
-                state["RMS"] = self._rms(p_data_fp32)
+                #state["RMS"] = self._rms(p_data_fp32)
 
                 # Use fixed beta2 from group instead of decay_rate calculation
                 beta1 = group["beta1"]
@@ -374,7 +374,7 @@ class Automagic(torch.optim.Optimizer):
         if self.use_adopt:
             state["exp_avg"] = torch.zeros_like(p)
 
-        state["RMS"] = 0
+        #state["RMS"] = 0
     
     # override the state_dict to save the lr_mask
     def state_dict(self, *args, **kwargs):
