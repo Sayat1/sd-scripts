@@ -18,7 +18,9 @@ class Automagic(torch.optim.Optimizer):
         weight_decay=0.0,
         do_paramiter_swapping=False,
         paramiter_swapping_factor=0.1,
-    ):
+        use_adopt=False,
+        beta1=0.9,
+        ):
         self.lr = lr
         if self.lr > 1e-3:
             print(f"Warning! Start lr is very high: {self.lr}. Forcing to 1e-6. this does not work like prodigy")
@@ -26,13 +28,16 @@ class Automagic(torch.optim.Optimizer):
         self.min_lr = min_lr
         self.max_lr = max_lr
         self.lr_bump = lr_bump
+        self.use_adopt = use_adopt
 
         defaults = {
             "lr": lr,
             "eps": eps,
             "clip_threshold": clip_threshold,
+            "beta1": beta1,
             "beta2": beta2,
             "weight_decay": weight_decay,
+            "use_adopt": use_adopt,
         }
         super().__init__(params, defaults)
 
@@ -210,29 +215,57 @@ class Automagic(torch.optim.Optimizer):
                 state["RMS"] = self._rms(p_data_fp32)
 
                 # Use fixed beta2 from group instead of decay_rate calculation
+                beta1 = group["beta1"]
                 beta2 = group["beta2"]
                 eps = group["eps"]
                 if isinstance(eps, tuple) or isinstance(eps, list):
                     eps = eps[0]
-                update = (grad**2) + eps
-                if factored:
-                    exp_avg_sq_row = state["exp_avg_sq_row"]
-                    exp_avg_sq_col = state["exp_avg_sq_col"]
 
-                    exp_avg_sq_row.mul_(beta2).add_(
-                        update.mean(dim=-1), alpha=(1.0 - beta2))
-                    exp_avg_sq_col.mul_(beta2).add_(
-                        update.mean(dim=-2), alpha=(1.0 - beta2))
+                if self.use_adopt:
+                    if state["step"] == 1:
+                        # ADOPT step 1: only update exp_avg_sq
+                        update_sq = grad**2
+                        if factored:
+                            state["exp_avg_sq_row"].add_(update_sq.mean(dim=-1))
+                            state["exp_avg_sq_col"].add_(update_sq.mean(dim=-2))
+                        else:
+                            state["exp_avg_sq"].addcmul_(grad, grad)
+                        continue
 
-                    # Approximation of exponential moving average of square of gradient
-                    update = self._approx_sq_grad(
-                        exp_avg_sq_row, exp_avg_sq_col)
-                    update.mul_(grad)
+                    # ADOPT step > 1
+                    if factored:
+                        de_nom_inv = self._approx_sq_grad(state["exp_avg_sq_row"], state["exp_avg_sq_col"])
+                    else:
+                        de_nom_inv = state["exp_avg_sq"].add(eps).rsqrt()
+
+                    normed_grad = grad * de_nom_inv
+
+                    # ADOPT-style clipping
+                    clip = state["step"] ** 0.25
+                    normed_grad.clamp_(-clip, clip)
+
+                    state["exp_avg"].lerp_(normed_grad, 1.0 - beta1)
+                    update = state["exp_avg"].clone()
                 else:
-                    exp_avg_sq = state["exp_avg_sq"]
+                    update_sq = (grad**2) + eps
+                    if factored:
+                        exp_avg_sq_row = state["exp_avg_sq_row"]
+                        exp_avg_sq_col = state["exp_avg_sq_col"]
 
-                    exp_avg_sq.mul_(beta2).add_(update, alpha=(1.0 - beta2))
-                    update = exp_avg_sq.rsqrt().mul_(grad)
+                        exp_avg_sq_row.mul_(beta2).add_(
+                            update_sq.mean(dim=-1), alpha=(1.0 - beta2))
+                        exp_avg_sq_col.mul_(beta2).add_(
+                            update_sq.mean(dim=-2), alpha=(1.0 - beta2))
+
+                        # Approximation of exponential moving average of square of gradient
+                        update = self._approx_sq_grad(
+                            exp_avg_sq_row, exp_avg_sq_col)
+                        update.mul_(grad)
+                    else:
+                        exp_avg_sq = state["exp_avg_sq"]
+
+                        exp_avg_sq.mul_(beta2).add_(update_sq, alpha=(1.0 - beta2))
+                        update = exp_avg_sq.rsqrt().mul_(grad)
 
                 update.div_(
                     (self._rms(update) / group["clip_threshold"]).clamp_(min=1.0))
@@ -279,6 +312,15 @@ class Automagic(torch.optim.Optimizer):
 
                 p_data_fp32.add_(-update)
 
+                if self.use_adopt:
+                    # ADOPT: update exp_avg_sq at the end
+                    update_sq = grad**2
+                    if factored:
+                        state["exp_avg_sq_row"].mul_(beta2).add_(update_sq.mean(dim=-1), alpha=1.0 - beta2)
+                        state["exp_avg_sq_col"].mul_(beta2).add_(update_sq.mean(dim=-2), alpha=1.0 - beta2)
+                    else:
+                        state["exp_avg_sq"].mul_(beta2).addcmul_(grad, grad, value=1.0 - beta2)
+
                 if p.dtype != torch.float32:
                     # apply stochastic rounding
                     copy_stochastic(p, p_data_fp32)
@@ -308,6 +350,9 @@ class Automagic(torch.optim.Optimizer):
                 p.shape[:-2] + p.shape[-1:]).to(p)
         else:
             state["exp_avg_sq"] = torch.zeros_like(p)
+
+        if self.use_adopt:
+            state["exp_avg"] = torch.zeros_like(p)
 
         state["RMS"] = 0
     
