@@ -223,7 +223,7 @@ class Automagic(torch.optim.Optimizer):
                 if isinstance(eps, tuple) or isinstance(eps, list):
                     eps = eps[0]
 
-                local_eps = eps if eps is not None else 1e-30
+                local_eps = eps if eps is not None else 1e-16
 
                 if self.use_adopt:
                     update_sq = grad**2 + local_eps
@@ -334,7 +334,7 @@ class Automagic(torch.optim.Optimizer):
 
                 if self.use_adopt:
                     # ADOPT: update exp_avg_sq at the end
-                    update_sq = grad**2 + eps
+                    update_sq = grad**2 + local_eps
                     if factored:
                         state["exp_avg_sq_row"].mul_(beta2).add_(update_sq.mean(dim=-1), alpha=1.0 - beta2)
                         state["exp_avg_sq_col"].mul_(beta2).add_(update_sq.mean(dim=-2), alpha=1.0 - beta2)
