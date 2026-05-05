@@ -7,3 +7,5 @@ Here is the essential context for our project. Please read and understand it tho
 
 ### Project Overview
 @./context/01-overview.md
+
+response in Korean.

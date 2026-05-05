@@ -222,21 +222,22 @@ class Automagic(torch.optim.Optimizer):
                     eps = eps[0]
 
                 if self.use_adopt:
+                    update_sq = grad**2 + eps
                     if state["step"] == 1:
                         # ADOPT step 1: only update exp_avg_sq
-                        update_sq = grad**2
                         if factored:
                             state["exp_avg_sq_row"].add_(update_sq.mean(dim=-1))
                             state["exp_avg_sq_col"].add_(update_sq.mean(dim=-2))
                         else:
-                            state["exp_avg_sq"].addcmul_(grad, grad)
+                            state["exp_avg_sq"].add_(update_sq)
                         continue
 
                     # ADOPT step > 1
                     if factored:
                         de_nom_inv = self._approx_sq_grad(state["exp_avg_sq_row"], state["exp_avg_sq_col"])
                     else:
-                        de_nom_inv = state["exp_avg_sq"].add(eps).rsqrt()
+                        # Reference ADOPT uses clamp(min=eps), here we have eps added to the moment
+                        de_nom_inv = state["exp_avg_sq"].rsqrt()
 
                     normed_grad = grad * de_nom_inv
 
@@ -314,12 +315,12 @@ class Automagic(torch.optim.Optimizer):
 
                 if self.use_adopt:
                     # ADOPT: update exp_avg_sq at the end
-                    update_sq = grad**2
+                    update_sq = grad**2 + eps
                     if factored:
                         state["exp_avg_sq_row"].mul_(beta2).add_(update_sq.mean(dim=-1), alpha=1.0 - beta2)
                         state["exp_avg_sq_col"].mul_(beta2).add_(update_sq.mean(dim=-2), alpha=1.0 - beta2)
                     else:
-                        state["exp_avg_sq"].mul_(beta2).addcmul_(grad, grad, value=1.0 - beta2)
+                        state["exp_avg_sq"].mul_(beta2).add_(update_sq, alpha=1.0 - beta2)
 
                 if p.dtype != torch.float32:
                     # apply stochastic rounding
