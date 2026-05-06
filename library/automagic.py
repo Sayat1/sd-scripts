@@ -386,80 +386,37 @@ class Automagic(torch.optim.Optimizer):
                     break
 
         if not is_valid_automagic_state:
+            # Fallback: if it's a regular state dict, still try to load it
+            super().load_state_dict(state_dict)
             return
 
-        # First, call the parent class's load_state_dict to load the basic optimizer state
-        # We'll handle the lr_mask separately
-        state_dict_copy = {"state": {}, "param_groups": state_dict["param_groups"]}
+        # First, call the parent class's load_state_dict to load the basic optimizer state.
+        # This will also handle the mapping of parameter IDs and move tensors to the correct device.
+        super().load_state_dict(state_dict)
 
-        # Copy all state entries except lr_mask
-        for param_id, param_state in state_dict["state"].items():
-            state_dict_copy["state"][param_id] = {k: v for k, v in param_state.items() if k != "lr_mask"}
+        # Now handle the lr_mask separately, converting it back to Auto8bitTensor
+        for i, (p, state) in enumerate(self.state.items()):
+            if "lr_mask" in state and isinstance(state["lr_mask"], dict):
+                saved_lr_mask = state["lr_mask"]
 
-        # Call parent class load_state_dict with the modified state dict
-        super().load_state_dict(state_dict_copy)
-
-        # Now handle the lr_mask separately
-        # We need to map the saved parameters to the current parameters
-        # This is tricky because the parameter IDs might be different
-
-        # Get all current parameters that require gradients
-        current_params = []
-        for group in self.param_groups:
-            for p in group["params"]:
-                if p.requires_grad:
-                    current_params.append(p)
-
-        # If the number of parameters doesn't match, we can't reliably map them
-        if len(current_params) != len(state_dict["param_groups"][0]["params"]):
-            print(
-                f"WARNING: Number of parameters doesn't match between saved state ({len(state_dict['param_groups'][0]['params'])}) "
-                f"and current model ({len(current_params)}). Learning rate masks may not be correctly loaded."
-            )
-
-        # Map parameters by their position in the param_groups
-        # This assumes the order of parameters is preserved between saving and loading
-        saved_param_ids = list(state_dict["state"].keys())
-
-        for i, current_param in enumerate(current_params):
-            if i >= len(saved_param_ids):
-                break
-
-            saved_param_id = saved_param_ids[i]
-            saved_state = state_dict["state"][saved_param_id]
-
-            # Skip if this saved state doesn't have an lr_mask
-            if "lr_mask" not in saved_state:
-                continue
-
-            # Initialize the state for this parameter if it doesn't exist
-            if current_param not in self.state:
-                self.initialize_state(current_param)
-
-            # Get the current state for this parameter
-            current_state = self.state[current_param]
-
-            # Load the lr_mask from the saved state
-            saved_lr_mask = saved_state["lr_mask"]
-
-            # Reconstruct the Auto8bitTensor from its state dict
-            try:
-                # Make sure the shapes match
-                if "quantized" in saved_lr_mask and saved_lr_mask["quantized"].shape == current_param.shape:
-                    current_state["lr_mask"] = Auto8bitTensor(saved_lr_mask)
-                else:
-                    print(
-                        f"WARNING: Shape mismatch for parameter {i}. "
-                        f"Expected {current_param.shape}, got {saved_lr_mask['quantized'].shape if 'quantized' in saved_lr_mask else 'unknown'}. "
-                        f"Initializing new lr_mask."
-                    )
+                # Reconstruct the Auto8bitTensor from its state dict
+                try:
+                    # Make sure the shapes match
+                    if "quantized" in saved_lr_mask and saved_lr_mask["quantized"].shape == p.shape:
+                        state["lr_mask"] = Auto8bitTensor(saved_lr_mask)
+                    else:
+                        print(
+                            f"WARNING: Shape mismatch for parameter {i}. "
+                            f"Expected {p.shape}, got {saved_lr_mask['quantized'].shape if 'quantized' in saved_lr_mask else 'unknown'}. "
+                            f"Initializing new lr_mask."
+                        )
+                        # Initialize a new lr_mask
+                        state["lr_mask"] = Auto8bitTensor(
+                            torch.full(p.shape, self.lr, device=p.device, dtype=torch.float32)
+                        )
+                except Exception as e:
+                    print(f"ERROR: Failed to load lr_mask for parameter {i}: {e}")
                     # Initialize a new lr_mask
-                    current_state["lr_mask"] = Auto8bitTensor(
-                        torch.full(current_param.shape, self.lr, device=current_param.device, dtype=torch.float32)
+                    state["lr_mask"] = Auto8bitTensor(
+                        torch.full(p.shape, self.lr, device=p.device, dtype=torch.float32)
                     )
-            except Exception as e:
-                print(f"ERROR: Failed to load lr_mask for parameter {i}: {e}")
-                # Initialize a new lr_mask
-                current_state["lr_mask"] = Auto8bitTensor(
-                    torch.full(current_param.shape, self.lr, device=current_param.device, dtype=torch.float32)
-                )
