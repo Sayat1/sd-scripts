@@ -87,9 +87,7 @@ class NetworkTrainer:
 
         if args.optimizer_type.lower() == "Automagic".lower():
             opt = optimizer.optimizer
-            opt_lrs = opt.get_learning_rates(mode=0)
-            max_opt_lrs = opt.get_learning_rates(mode=1)
-            min_opt_lrs = opt.get_learning_rates(mode=2)
+            opt_lrs = opt.get_learning_rates()
 
         lrs = lr_scheduler.get_last_lr()
         for i, lr in enumerate(lrs):
@@ -116,9 +114,9 @@ class NetworkTrainer:
 
             if args.optimizer_type.lower() == "Automagic".lower():
                 if isinstance(opt_lrs, list):
-                    logs[f"lr/auto_lr/{lr_desc}"] = opt_lrs[i]
-                    logs[f"lr/auto_lr_min/{lr_desc}"] = min_opt_lrs[i]
-                    logs[f"lr/auto_lr_max/{lr_desc}"] = max_opt_lrs[i]
+                    logs[f"lr/auto_lr/{lr_desc}"] = opt_lrs[i][0]
+                    logs[f"lr/auto_lr_min/{lr_desc}"] = opt_lrs[i][2]
+                    logs[f"lr/auto_lr_max/{lr_desc}"] = opt_lrs[i][1]
                 else:
                     logs[f"lr/auto_lr/{lr_desc}"] = opt_lrs
 
