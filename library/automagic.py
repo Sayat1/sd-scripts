@@ -102,11 +102,15 @@ class Automagic(torch.optim.Optimizer):
             lr = 0.0
         return lr
 
-    def _get_group_lr(self, group):
+    def _get_group_lrs(self, group):
         group_lrs = []
         for p in group["params"]:
             p_lr = self._get_lr(group, self.state[p])
             group_lrs.append(p_lr.item() if isinstance(p_lr, torch.Tensor) else p_lr)
+        return group_lrs
+
+    def _get_group_lr(self, group):
+        group_lrs = self._get_group_lrs(group)
         # return avg
         if len(group_lrs) == 0:
             return self.lr
@@ -128,8 +132,13 @@ class Automagic(torch.optim.Optimizer):
                     del param._accum_grad
 
     # automagic manages its own lr
-    def get_learning_rates(self):
-        lrs = [self._get_group_lr(group) for group in self.param_groups]
+    def get_learning_rates(self, mode=0):
+        if mode == 0:
+            lrs = [self._get_group_lr(group) for group in self.param_groups]
+        elif mode == 1:
+            lrs = [max(self._get_group_lrs(group)) for group in self.param_groups]
+        elif mode == 2:
+            lrs = [min(self._get_group_lrs(group)) for group in self.param_groups]
         if len(lrs) == 0:
             lrs = self.base_lrs  # if called before stepping
         return lrs
