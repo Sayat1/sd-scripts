@@ -121,6 +121,14 @@ class Automagic(torch.optim.Optimizer):
         # Optimized: sqrt(mean(x^2))
         return tensor.pow(2).mean().sqrt()
 
+    @staticmethod
+    def _approx_sq_grad(exp_avg_sq_row, exp_avg_sq_col):
+        # Optimized: avoid multiple unsqueeze and de-reference row_mean
+        row_mean = exp_avg_sq_row.mean(dim=-1, keepdim=True)
+        r_factor = torch.rsqrt(exp_avg_sq_row / row_mean).unsqueeze(-1)
+        c_factor = torch.rsqrt(exp_avg_sq_col).unsqueeze(-2)
+        return r_factor * c_factor
+
     def step_hook(self):
         if not self.is_stochastic_rounding_accumulation:
             return
@@ -202,15 +210,23 @@ class Automagic(torch.optim.Optimizer):
 
                 # Common gradient squared calculation
                 update_sq = grad.pow(2).add(local_eps)
+                factored = len(p.shape) >= 2
 
                 if use_adopt:
                     if step == 1:
                         # ADOPT step 1: only update exp_avg_sq
-                        state["exp_avg_sq"].add_(update_sq)
+                        if factored:
+                            state["exp_avg_sq_row"].add_(update_sq.mean(dim=-1))
+                            state["exp_avg_sq_col"].add_(update_sq.mean(dim=-2))
+                        else:
+                            state["exp_avg_sq"].add_(update_sq)
                         continue
 
                     # ADOPT step > 1
-                    de_nom_inv = state["exp_avg_sq"].rsqrt()
+                    if factored:
+                        de_nom_inv = self._approx_sq_grad(state["exp_avg_sq_row"], state["exp_avg_sq_col"])
+                    else:
+                        de_nom_inv = state["exp_avg_sq"].rsqrt()
 
                     normed_grad = grad * de_nom_inv
 
@@ -226,14 +242,29 @@ class Automagic(torch.optim.Optimizer):
                         update = torch.atan(update).mul_(ATAN_CONSTANT)
                 else:
                     # Non-ADOPT path
-                    exp_avg_sq = state["exp_avg_sq"]
-                    exp_avg_sq.mul_(beta2).add_(update_sq, alpha=beta2_inv)
+                    if factored:
+                        exp_avg_sq_row = state["exp_avg_sq_row"]
+                        exp_avg_sq_col = state["exp_avg_sq_col"]
 
-                    if use_atan2:
-                        # atan2(grad, sqrt(exp_avg_sq)) = atan(grad / sqrt(exp_avg_sq))
-                        update = torch.atan(grad * exp_avg_sq.rsqrt()).mul_(ATAN_CONSTANT)
+                        exp_avg_sq_row.mul_(beta2).add_(update_sq.mean(dim=-1), alpha=beta2_inv)
+                        exp_avg_sq_col.mul_(beta2).add_(update_sq.mean(dim=-2), alpha=beta2_inv)
+
+                        de_nom_inv = self._approx_sq_grad(exp_avg_sq_row, exp_avg_sq_col)
+
+                        if use_atan2:
+                            # atan2(grad, 1/de_nom_inv) = atan(grad * de_nom_inv)
+                            update = torch.atan(grad * de_nom_inv).mul_(ATAN_CONSTANT)
+                        else:
+                            update = grad * de_nom_inv
                     else:
-                        update = grad * exp_avg_sq.rsqrt()
+                        exp_avg_sq = state["exp_avg_sq"]
+                        exp_avg_sq.mul_(beta2).add_(update_sq, alpha=beta2_inv)
+
+                        if use_atan2:
+                            # atan2(grad, sqrt(exp_avg_sq)) = atan(grad / sqrt(exp_avg_sq))
+                            update = torch.atan(grad * exp_avg_sq.rsqrt()).mul_(ATAN_CONSTANT)
+                        else:
+                            update = grad * exp_avg_sq.rsqrt()
 
                 if use_orthograd:
                     self.apply_orthogonal_gradients(p)
@@ -267,7 +298,11 @@ class Automagic(torch.optim.Optimizer):
 
                 if use_adopt:
                     # ADOPT: update exp_avg_sq at the end
-                    state["exp_avg_sq"].mul_(beta2).add_(update_sq, alpha=beta2_inv)
+                    if factored:
+                        state["exp_avg_sq_row"].mul_(beta2).add_(update_sq.mean(dim=-1), alpha=beta2_inv)
+                        state["exp_avg_sq_col"].mul_(beta2).add_(update_sq.mean(dim=-2), alpha=beta2_inv)
+                    else:
+                        state["exp_avg_sq"].mul_(beta2).add_(update_sq, alpha=beta2_inv)
 
                 if p.dtype != torch.float32:
                     # apply stochastic rounding
@@ -314,8 +349,12 @@ class Automagic(torch.optim.Optimizer):
         if "last_polarity" not in state:
             state["last_polarity"] = torch.zeros(p.shape, dtype=torch.bool, device=p.device)
 
-        # Unified exp_avg_sq
-        state["exp_avg_sq"] = torch.zeros_like(p, dtype=torch.float32)
+        factored = len(p.shape) >= 2
+        if factored:
+            state["exp_avg_sq_row"] = torch.zeros(p.shape[:-1], device=p.device, dtype=torch.float32)
+            state["exp_avg_sq_col"] = torch.zeros(p.shape[:-2] + p.shape[-1:], device=p.device, dtype=torch.float32)
+        else:
+            state["exp_avg_sq"] = torch.zeros_like(p, dtype=torch.float32)
 
         if self.use_adopt:
             state["exp_avg"] = torch.zeros_like(p, dtype=torch.float32)
