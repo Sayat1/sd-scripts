@@ -1638,6 +1638,8 @@ class NetworkTrainer:
                                 remove_model(remove_ckpt_name)
                     optimizer_train_fn()
 
+                if not torch.isfinite(loss):
+                    raise ValueError(f"Loss is nan or inf")
                 current_loss = loss.detach().item()
                 loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
                 avr_loss: float = loss_recorder.moving_average
