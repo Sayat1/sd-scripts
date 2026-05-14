@@ -118,8 +118,8 @@ def load_anima_model(
         weight_transform_hooks=rename_hooks,
     )
 
-    if sd.keys()[0].startswith("model.diffusion_model."):
-        logger.info("it's has comfyui style prefix fix to net.")
+    if next(iter(sd)).startswith("model.diffusion_model."):
+        logger.info("it has comfyui style prefixies. fix to net.")
         for key in sd.keys():
             sd["net." + key[len("model.diffusion_model.") :]] = sd.pop(key)
 
