@@ -437,7 +437,7 @@ def setup_parser() -> argparse.ArgumentParser:
     return parser
 
 
-if __name__ == "__main__":
+def main():
     parser = setup_parser()
 
     args = parser.parse_args()
@@ -449,3 +449,6 @@ if __name__ == "__main__":
 
     trainer = AnimaNetworkTrainer()
     trainer.train(args)
+
+if __name__ == "__main__":
+    main()
