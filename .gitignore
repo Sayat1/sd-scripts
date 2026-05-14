@@ -17,3 +17,5 @@ references
 /clipoutput
 /node_modules
 *.js
+run_modal_kh.py
+*.mp3
