@@ -549,7 +549,7 @@ class SdxlStableDiffusionLongPromptWeightingPipeline:
         scheduler: SchedulerMixin,
         # clip_skip: int,
         safety_checker: StableDiffusionSafetyChecker,
-        feature_extractor: CLIPImageProcessor,
+        feature_extractor: CLIPFeatureExtractor,
         requires_safety_checker: bool = True,
         clip_skip: int = 1,
     ):
