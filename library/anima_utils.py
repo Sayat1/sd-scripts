@@ -103,7 +103,8 @@ def load_anima_model(
 
     # load model weights with dynamic fp8 optimization and LoRA merging if needed
     logger.info(f"Loading DiT model from {dit_path}, device={loading_device}")
-    rename_hooks = WeightTransformHooks(rename_hook=lambda k: k[len("net.") :] if k.startswith("net.") else k)
+    rename_hooks = WeightTransformHooks(rename_hook=lambda k: k[len("net.") :] if k.startswith("net.") else \
+                                        k[len("model.diffusion_model.") :] if k.startswith("model.diffusion_model.") else k)
     sd = load_safetensors_with_lora_and_fp8(
         model_files=dit_path,
         lora_weights_list=lora_weights_list,
@@ -116,6 +117,11 @@ def load_anima_model(
         exclude_keys=FP8_OPTIMIZATION_EXCLUDE_KEYS,
         weight_transform_hooks=rename_hooks,
     )
+
+    if sd.keys()[0].startswith("model.diffusion_model."):
+        logger.info("it's has comfyui style prefix fix to net.")
+        for key in sd.keys():
+            sd["net." + key[len("model.diffusion_model.") :]] = sd.pop(key)
 
     if fp8_scaled:
         apply_fp8_monkey_patch(model, sd, use_scaled_mm=False)
