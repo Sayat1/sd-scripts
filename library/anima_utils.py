@@ -137,7 +137,7 @@ def load_anima_model(
         if unexpected_missing:
             # Raise error to avoid silent failures
             raise RuntimeError(
-                f"Missing keys in checkpoint: {unexpected_missing[:10]}{'...' if len(unexpected_missing) > 10 else ''}"
+                f"Missing keys in checkpoint: {unexpected_missing[:10]}{f'... {len(unexpected_missing)}' if len(unexpected_missing) > 10 else ''}"
             )
         missing = {}  # all missing keys were expected
     if unexpected:
