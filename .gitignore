@@ -19,6 +19,7 @@ references
 *.js
 run_modal_kh.py
 *.mp3
+modal_commands/
 
 # inpainting test artefacts (synthetic data, training outputs, downloads, mask viz)
 tests/test_data/
