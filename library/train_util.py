@@ -1017,9 +1017,9 @@ class BaseDataset(torch.utils.data.Dataset):
 
         # caption に prefix/suffix を付ける
         if subset.caption_prefix:
-            caption = subset.caption_prefix + " " + caption
+            caption = subset.caption_prefix + caption
         if subset.caption_suffix:
-            caption = caption + " " + subset.caption_suffix
+            caption = caption + subset.caption_suffix
 
         return caption
 
