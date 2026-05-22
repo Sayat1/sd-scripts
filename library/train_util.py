@@ -908,12 +908,6 @@ class BaseDataset(torch.utils.data.Dataset):
         self.replacements[str_from] = str_to
 
     def process_caption(self, subset: BaseSubset, caption):
-        # caption に prefix/suffix を付ける
-        if subset.caption_prefix:
-            caption = subset.caption_prefix + " " + caption
-        if subset.caption_suffix:
-            caption = caption + " " + subset.caption_suffix
-
         # dropoutの決定：tag dropがこのメソッド内にあるのでここで行うのが良い
         is_drop_out = subset.caption_dropout_rate > 0 and random.random() < subset.caption_dropout_rate
         is_drop_out = (
@@ -1020,6 +1014,12 @@ class BaseDataset(torch.utils.data.Dataset):
                         caption = str_to
                 else:
                     caption = caption.replace(str_from, str_to)
+
+        # caption に prefix/suffix を付ける
+        if subset.caption_prefix:
+            caption = subset.caption_prefix + " " + caption
+        if subset.caption_suffix:
+            caption = caption + " " + subset.caption_suffix
 
         return caption
 
