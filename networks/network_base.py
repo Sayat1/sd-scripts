@@ -517,7 +517,7 @@ class AdditionalNetwork(torch.nn.Module):
             if split_conv:
                 unet_modules=[[],[]]
                 for unet_lora in self.unet_loras:
-                    if unet_lora.parent_name == "Transformer2DModel":
+                    if unet_lora.parent_name in self.arch_config.unet_target_modules:
                         unet_modules[0].append(unet_lora)
                     else:
                         unet_modules[1].append(unet_lora)
