@@ -6,6 +6,7 @@ import re
 from typing import Dict, List, Optional, Tuple, Type, Union
 import torch
 from library.utils import setup_logging
+from .network_base import AdditionalNetwork, detect_arch_config
 
 import logging
 
@@ -242,6 +243,9 @@ def create_network(
     if train_llm_adapter is not None:
         train_llm_adapter = True if train_llm_adapter.lower() == "true" else False
 
+    # detect architecture
+    arch_config = detect_arch_config(unet, text_encoders)
+
     exclude_patterns = kwargs.get("exclude_patterns", None)
     if exclude_patterns is None:
         exclude_patterns = []
@@ -307,15 +311,18 @@ def create_network(
     else:
         reg_dims = None
 
-    network = LoRANetwork(
+    network = AdditionalNetwork(
         text_encoders,
         unet,
+        arch_config=arch_config,
         multiplier=multiplier,
         lora_dim=network_dim,
         alpha=network_alpha,
         dropout=neuron_dropout,
         rank_dropout=rank_dropout,
         module_dropout=module_dropout,
+        module_class=LoRAModule,
+        module_kwargs=kwargs,
         train_llm_adapter=train_llm_adapter,
         exclude_patterns=exclude_patterns,
         include_patterns=include_patterns,
