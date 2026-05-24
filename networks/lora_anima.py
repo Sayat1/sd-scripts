@@ -29,6 +29,7 @@ class LoRAModule(torch.nn.Module):
         dropout=None,
         rank_dropout=None,
         module_dropout=None,
+        **kwargs,
     ):
         """
         if alpha == 0 or None, alpha is rank (no scaling).
