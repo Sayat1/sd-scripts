@@ -265,10 +265,14 @@ def create_network(
             include_patterns = [include_patterns]
 
     # rank/module dropout
-    rank_dropout = kwargs.get("rank_dropout", None)
+    dropout = neuron_dropout
+    dropout = kwargs.pop("dropout", None)
+    if dropout is not None:
+        dropout = float(rank_dropout)
+    rank_dropout = kwargs.pop("rank_dropout", None)
     if rank_dropout is not None:
         rank_dropout = float(rank_dropout)
-    module_dropout = kwargs.get("module_dropout", None)
+    module_dropout = kwargs.pop("module_dropout", None)
     if module_dropout is not None:
         module_dropout = float(module_dropout)
 
