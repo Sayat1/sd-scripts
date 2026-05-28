@@ -310,8 +310,8 @@ def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dty
             te2_sd[k] = state_dict.pop(k)
 
     # 最新の transformers では position_ids を含むとエラーになるので削除 / remove position_ids for latest transformers
-    if "text_model.embeddings.position_ids" in te1_sd:
-        te1_sd.pop("text_model.embeddings.position_ids")
+    if "embeddings.position_ids" in te1_sd:
+        te1_sd.pop("embeddings.position_ids")
 
     info1 = _load_state_dict_on_device(text_model1, te1_sd, device=map_location, dtype=torch.float32)  # remain fp32
     logger.info(f"text encoder 1: {info1}")
