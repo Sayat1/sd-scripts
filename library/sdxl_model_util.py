@@ -305,7 +305,7 @@ def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dty
     te2_sd = {}
     for k in list(state_dict.keys()):
         if k.startswith("conditioner.embedders.0.transformer."):
-            te1_sd[k.replace("conditioner.embedders.0.transformer.", "")] = state_dict.pop(k)
+            te1_sd[k.replace("conditioner.embedders.0.transformer.", "").replace("text_model.","")] = state_dict.pop(k)
         elif k.startswith("conditioner.embedders.1.model."):
             te2_sd[k] = state_dict.pop(k)
 
