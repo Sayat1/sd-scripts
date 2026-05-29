@@ -57,6 +57,42 @@ class NetworkTrainer:
     def __init__(self):
         self.vae_scale_factor = 0.18215
         self.is_sdxl = False
+        self._last_weight_noise_norm = None
+
+    def _inject_weight_noise(self, args, network, global_step):
+        if args.weight_noise_mode is None:
+            return
+
+        mode = args.weight_noise_mode
+        step = max(0, int(global_step))
+
+        do_log = args.weight_noise_log_every > 0 and step % args.weight_noise_log_every == 0
+        noise_sq = 0.0
+
+        for p in network.parameters():
+            if not p.requires_grad:
+                continue
+
+            w = p.data
+            if mode == "absolute":
+                sigma = float(args.weight_noise_sigma)
+            elif mode == "relative":
+                # per-param weight RMS
+                rms = float(w.detach().pow(2).mean().clamp_min(1e-30).sqrt())
+                sigma = float(args.weight_noise_sigma) * rms
+            else:
+                return
+
+            if sigma <= 0:
+                continue
+
+            noise = torch.randn_like(w) * sigma
+            if do_log:
+                noise_sq += float(noise.pow(2).sum())
+            w.add_(noise)
+
+        if do_log:
+            self._last_weight_noise_norm = noise_sq**0.5
 
     # TODO 他のスクリプトと共通化する
     def generate_step_logs(
@@ -123,6 +159,10 @@ class NetworkTrainer:
                         logs[f"lr/auto_lr/{lr_desc}"] = opt_lr
                 else:
                     logs[f"lr/auto_lr/{lr_desc}"] = opt_lrs
+
+        if self._last_weight_noise_norm is not None:
+            logs["weight_noise/norm"] = self._last_weight_noise_norm
+            self._last_weight_noise_norm = None
 
         return logs
 
@@ -514,11 +554,14 @@ class NetworkTrainer:
                 else:
                     bg_weights = None
                 #bg_weights 1에 근접 = 배경 강해짐 (마스킹 무효화) , 0에 근접 = 배경 약해짐 (마스킹 걍화)
-                loss = apply_masked_loss(loss, batch, min_mask=args.minimum_masked_loss_weight,bg_weights=bg_weights)
-
-        if not masking_loss:
+                loss, mask_image = apply_masked_loss(loss, batch, min_mask=args.minimum_masked_loss_weight,bg_weights=bg_weights)
+        dim_range = list(range(1, loss.ndim))
+        if masking_loss and args.masked_loss_normalize:
+            # 마스킹으로 인한 로스 불균형 정규화
+            loss = loss.sum(dim=dim_range) / mask_image.sum(dim=dim_range)
+        else:
             #masked loss는 이미 apply_masked_loss에서 평균화 함.
-            loss = loss.mean(dim=list(range(1, loss.ndim)))  # mean over all dims except batch
+            loss = loss.mean(dim=dim_range)  # mean over all dims except batch
 
         loss_weights = batch["loss_weights"]  # 各sampleごとのweight
         loss = loss * loss_weights
@@ -1595,6 +1638,8 @@ class NetworkTrainer:
                     lr_scheduler.step()
                     optimizer.zero_grad(set_to_none=True)
 
+                    self._inject_weight_noise(args, network, global_step)
+
                 if args.scale_weight_norms:
                     keys_scaled, mean_norm, maximum_norm = accelerator.unwrap_model(network).apply_max_norm_regularization(
                         args.scale_weight_norms, accelerator.device
@@ -2039,6 +2084,25 @@ def setup_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Max number of validation dataset items processed. By default, validation will run the entire validation dataset / 処理される検証データセット項目の最大数。デフォルトでは、検証は検証データセット全体を実行します",
+    )
+    parser.add_argument(
+        "--weight_noise_mode",
+        type=str,
+        default=None,
+        choices=[None, "absolute", "relative"],
+        help="weight noise mode / 重みノイズ의 모드",
+    )
+    parser.add_argument(
+        "--weight_noise_sigma",
+        type=float,
+        default=1.25e-2,
+        help="sigma for weight noise / 重みノイズ의 sigma 값",
+    )
+    parser.add_argument(
+        "--weight_noise_log_every",
+        type=int,
+        default=0,
+        help="log weight noise metrics every N steps / 重みノイズ 메트릭을 N 스텝마다 기록함",
     )
     return parser
 

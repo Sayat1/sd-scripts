@@ -509,11 +509,8 @@ def apply_masked_loss(loss, batch, min_mask=0.0, bg_weights=None) -> torch.Float
             mask_image = torch.clamp(mask_image, min=min_mask)
 
     loss = loss * mask_image
-    dim_range = list(range(1, loss.ndim))
-    # 마스킹으로 인한 로스 불균형 정규화
-    loss = loss.sum(dim=dim_range) / mask_image.sum(dim=dim_range)
 
-    return loss
+    return loss, mask_image
 
 
 """
