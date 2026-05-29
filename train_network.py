@@ -596,7 +596,7 @@ class NetworkTrainer:
                         depth_preview_parent = os.path.join(args.output_dir, "depth_previews")
                         os.makedirs(depth_preview_parent, exist_ok=True)
                         output_path = os.path.join(depth_preview_parent, f"depth_preview_{global_step:06d}.png")
-                        depth_utils.save_depth_comparison(x0_pixels[0], d_pred, d_gt, output_path)
+                        depth_utils.save_depth_comparison(x0_pixels[0].detach(), d_pred, d_gt, output_path)
 
                 # apply weight
                 depth_loss = depth_loss * args.depth_consistency_weight
@@ -1136,7 +1136,7 @@ class NetworkTrainer:
             vae.requires_grad_(False)
             vae.eval()
             vae.to(accelerator.device, dtype=vae_dtype)
-            
+
         clean_memory_on_device(accelerator.device)
 
         # 実験的機能：勾配も含めたfp16学習を行う　PyTorchにパッチを当ててfp16でのgrad scaleを有効にする
