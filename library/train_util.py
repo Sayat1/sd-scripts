@@ -209,6 +209,8 @@ class ImageInfo:
         self.text_encoder_outputs2: Optional[torch.Tensor] = None
         self.text_encoder_pool2: Optional[torch.Tensor] = None
 
+        self.depth_gt: Optional[torch.Tensor] = None
+
         self.alpha_mask: Optional[torch.Tensor] = None  # alpha mask can be flipped in runtime
         self.resize_interpolation: Optional[str] = None
 
@@ -1750,10 +1752,13 @@ class BaseDataset(torch.utils.data.Dataset):
         custom_attributes = []
         masks = []
         masked_images = []
+        depth_gt_list = []
 
         for image_key in bucket[image_index : image_index + bucket_batch_size]:
             image_info = self.image_data[image_key]
             subset = self.image_to_subset[image_key]
+            v_idx = None
+            crop_ltrb = None
 
             custom_attributes.append(subset.custom_attributes)
 
@@ -1899,6 +1904,25 @@ class BaseDataset(torch.utils.data.Dataset):
             target_sizes_hw.append((int(target_size[1]), int(target_size[0])))
             flippeds.append(flipped)
 
+            # handle depth_gt
+            if hasattr(image_info, "depth_gt") and image_info.depth_gt is not None:
+                depth_gt = image_info.depth_gt
+
+                # Check if it's a list (variations)
+                if isinstance(depth_gt, list):
+                    # v_idx is determined earlier for latents
+                    # if it's not defined (not variations for latents but variations for depth, which is unlikely), use 0
+                    current_v_idx = v_idx if 'v_idx' in locals() and v_idx is not None else 0
+                    depth_gt = depth_gt[current_v_idx]
+                elif not (hasattr(image_info, "latents_crop_ltrb") and image_info.latents_crop_ltrb is not None):
+                    # It's a full depth map, need to crop it
+                    # crop_ltrb is ALWAYS defined by this point
+                    depth_gt = depth_gt[crop_ltrb[1] : crop_ltrb[3], crop_ltrb[0] : crop_ltrb[2]]
+
+                if flipped:
+                    depth_gt = torch.flip(depth_gt, [1])
+                depth_gt_list.append(depth_gt)
+
             # caption과 text encoder output을 처리する
             caption = image_info.caption  # default
 
@@ -1997,6 +2021,8 @@ class BaseDataset(torch.utils.data.Dataset):
         example["loss_weights"] = torch.FloatTensor(loss_weights)
         example["text_encoder_outputs_list"] = none_or_stack_elements(text_encoder_outputs_list, torch.FloatTensor)
         example["input_ids_list"] = none_or_stack_elements(input_ids_list, lambda x: x)
+        if len(depth_gt_list) > 0:
+            example["depth_gt_list"] = depth_gt_list
 
         # if one of alpha_masks is not None, we need to replace None with ones
         none_or_not = [x is None for x in alpha_mask_list]

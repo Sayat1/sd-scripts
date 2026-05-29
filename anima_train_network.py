@@ -34,6 +34,13 @@ class AnimaNetworkTrainer(train_network.NetworkTrainer):
     def __init__(self):
         super().__init__()
         self.sample_prompts_te_outputs = None
+        self.vae_scale_factor = 1.0
+
+    def get_x0_from_noise_pred(self, args, noise_pred, noisy_latents, timesteps, noise_scheduler):
+        # Flow matching: x0 = xt - t * v
+        # timesteps is already in [0, 1] range for Anima
+        sigma = timesteps.view(-1, 1, 1, 1)
+        return noisy_latents - sigma * noise_pred
 
     def assert_extra_args(
         self,
@@ -341,6 +348,8 @@ class AnimaNetworkTrainer(train_network.NetworkTrainer):
         is_train=True,
         train_text_encoder=True,
         train_unet=True,
+        global_step=None,
+        depth_consistency_manager=None,
     ) -> torch.Tensor:
         """Override base process_batch for caption dropout with cached text encoder outputs."""
 
@@ -374,6 +383,8 @@ class AnimaNetworkTrainer(train_network.NetworkTrainer):
             is_train,
             train_text_encoder,
             train_unet,
+            global_step=global_step,
+            depth_consistency_manager=depth_consistency_manager,
         )
 
     def post_process_loss(self, loss, args, timesteps, noise_scheduler):
