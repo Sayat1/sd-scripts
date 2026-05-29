@@ -163,15 +163,27 @@ def compute_depth_consistency_loss(
 
     if mask is not None:
         if mask.dim() == 2:
-            mask = mask.unsqueeze(0)
+            mask = mask.unsqueeze(0).unsqueeze(0) # (H, W) -> (1, 1, H, W)
+        elif mask.dim() == 3:
+            mask = mask.unsqueeze(1) # (B, H, W) -> (B, 1, H, W)
+        
         if mask.shape[-2:] != d_pred.shape[-2:]:
             mask = F.interpolate(
-                mask.unsqueeze(1).float(),
+                mask.float(),
                 size=d_pred.shape[-2:],
                 mode="bilinear",
                 align_corners=False,
-            ).squeeze(1)
+            )
+        
+        if mask.shape[1] != 1:
+            mask = mask[:, 0:1] # Ensure single channel
+
+        if mask.shape[0] == 1 and d_pred.shape[0] > 1:
+            mask = mask.expand(d_pred.shape[0], -1, -1, -1)
+            
         mask = mask.to(d_pred.device, dtype=d_pred.dtype)
+        # Squeeze back to (B, H, W) if ssi_l1 expects that, but let's check ssi_l1
+        mask = mask.squeeze(1)
 
     ssi, s_align, t_align = ssi_l1(d_pred, target, mask)
     d_pred_aligned = s_align.view(-1, 1, 1) * d_pred + t_align.view(-1, 1, 1)
