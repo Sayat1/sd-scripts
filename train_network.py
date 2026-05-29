@@ -593,7 +593,7 @@ class NetworkTrainer:
                 # preview
                 if args.depth_consistency_preview_every > 0 and global_step % args.depth_consistency_preview_every == 0:
                     if accelerator.is_main_process:
-                        depth_preview_parent = os.path.join(args.output_dir, "depth_previews")
+                        depth_preview_parent = os.path.join(args.output_dir , args.output_name, "depth_previews")
                         os.makedirs(depth_preview_parent, exist_ok=True)
                         output_path = os.path.join(depth_preview_parent, f"depth_preview_{global_step:06d}.png")
                         depth_utils.save_depth_comparison(x0_pixels[0].detach(), d_pred, d_gt, output_path)
