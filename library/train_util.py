@@ -4614,6 +4614,12 @@ def add_masked_loss_arguments(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument(
+        "--masked_loss_normalize",
+        action="store_true",
+        help="apply mask for calculating loss. conditioning_data_dir is required for dataset. / 損失計算時にマスクを適用する。datasetにはconditioning_data_dirが必要",
+    )
+
+    parser.add_argument(
         "--masked_loss_mask_dropout", 
         type=float, default=0.0, 
         help="Rate of Mask dropout chance(0.0~1.0)"
