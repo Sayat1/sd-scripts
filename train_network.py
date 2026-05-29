@@ -573,9 +573,37 @@ class NetworkTrainer:
         if weighting is not None:
             loss = loss * weighting
 
+        # prepare mask if needed
+        masking_loss = False
+        mask_image = None
+        if args.masked_loss and ("alpha_masks" in batch and batch["alpha_masks"] is not None):
+            masking_loss = True
+            if args.masked_loss_mask_dropout!=0.0 and random.random() < args.masked_loss_mask_dropout:
+                masking_loss = False
+            
+            if masking_loss:
+                if args.masked_loss_bg_power is not None:
+                    #alphas = 타임스탭 높을수록 노이즈 높아져 마스킹 낮게 설정.
+                    alphas = noise_scheduler.alphas_cumprod[timesteps]
+                    bg_weights = ((1-alphas)**args.masked_loss_bg_power).view(-1, 1, 1, 1).to(loss.dtype)
+                elif args.masked_loss_by_timestep_power is not None:
+                    #타임스탭에 따라, 마스킹 세기가 아닌 되고/안되는 확률로 결정 (0 or 1).
+                    alphas = noise_scheduler.alphas_cumprod[timesteps]
+                    bg_weights = (((1-alphas)**args.masked_loss_by_timestep_power)>random.random()).float().view(-1, 1, 1, 1)
+                else:
+                    bg_weights = None
+                
+                # Calculate mask_image using the same logic as apply_masked_loss
+                # We can call apply_masked_loss with a dummy ones tensor to get the mask_image
+                _, mask_image = apply_masked_loss(torch.ones_like(loss), batch, min_mask=args.minimum_masked_loss_weight, bg_weights=bg_weights)
+
         # zero out diffusion loss if it's a depth step
         if use_loss_split and not step_is_diffusion:
             loss = loss * 0.0
+
+        # apply mask to diffusion loss
+        if masking_loss and mask_image is not None:
+            loss = loss * mask_image
 
         # depth consistency loss
         depth_loss = None
@@ -588,7 +616,8 @@ class NetworkTrainer:
             
             gt_depth_list = batch.get("depth_gt_list", None)
             if gt_depth_list is not None and depth_consistency_manager is not None:
-                depth_loss, ssi, grd, d_pred, d_gt = depth_consistency_manager.compute_loss(x0_pixels, gt_depth_list)
+                # Use the same mask_image for depth loss if available
+                depth_loss, ssi, grd, d_pred, d_gt = depth_consistency_manager.compute_loss(x0_pixels, gt_depth_list, mask=mask_image)
 
                 # preview
                 if args.depth_consistency_preview_every > 0 and global_step % args.depth_consistency_preview_every == 0:
@@ -605,30 +634,11 @@ class NetworkTrainer:
                 if use_loss_split and step_is_diffusion:
                      depth_loss = depth_loss * 0.0
 
-        masking_loss = False
-        if args.masked_loss and ("alpha_masks" in batch and batch["alpha_masks"] is not None):
-            masking_loss = True
-            if args.masked_loss_mask_dropout!=0.0 and random.random() < args.masked_loss_mask_dropout:
-                masking_loss = False
-            if masking_loss:
-                if args.masked_loss_bg_power is not None:
-                    #alphas = 타임스탭 높을수록 노이즈 높아져 마스킹 낮게 설정.
-                    alphas = noise_scheduler.alphas_cumprod[timesteps]
-                    bg_weights = ((1-alphas)**args.masked_loss_bg_power).view(-1, 1, 1, 1).to(loss.dtype)
-                elif args.masked_loss_by_timestep_power is not None:
-                    #타임스탭에 따라, 마스킹 세기가 아닌 되고/안되는 확률로 결정 (0 or 1).
-                    alphas = noise_scheduler.alphas_cumprod[timesteps]
-                    bg_weights = (((1-alphas)**args.masked_loss_by_timestep_power)>random.random()).float().view(-1, 1, 1, 1)
-                else:
-                    bg_weights = None
-                #bg_weights 1에 근접 = 배경 강해짐 (마스킹 무효화) , 0에 근접 = 배경 약해짐 (마스킹 걍화)
-                loss, mask_image = apply_masked_loss(loss, batch, min_mask=args.minimum_masked_loss_weight,bg_weights=bg_weights)
         dim_range = list(range(1, loss.ndim))
-        if masking_loss and args.masked_loss_normalize:
+        if masking_loss and args.masked_loss_normalize and mask_image is not None:
             # 마스킹으로 인한 로스 불균형 정규화
             loss = loss.sum(dim=dim_range) / mask_image.sum(dim=dim_range)
         else:
-            #masked loss는 이미 apply_masked_loss에서 평균화 함.
             loss = loss.mean(dim=dim_range)  # mean over all dims except batch
 
         loss_weights = batch["loss_weights"]  # 各sampleごとのweight
