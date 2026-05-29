@@ -1136,11 +1136,7 @@ class NetworkTrainer:
             vae.requires_grad_(False)
             vae.eval()
             vae.to(accelerator.device, dtype=vae_dtype)
-        else:
-            vae.to("meta")
-            del vae
-            vae = None
-
+            
         clean_memory_on_device(accelerator.device)
 
         # 実験的機能：勾配も含めたfp16学習を行う　PyTorchにパッチを当ててfp16でのgrad scaleを有効にする
