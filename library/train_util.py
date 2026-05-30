@@ -1748,6 +1748,7 @@ class BaseDataset(torch.utils.data.Dataset):
         crop_top_lefts = []
         target_sizes_hw = []
         flippeds = []  # 変数名が微妙
+        is_reg_list = []
         text_encoder_outputs_list = []
         custom_attributes = []
         masks = []
@@ -1764,6 +1765,7 @@ class BaseDataset(torch.utils.data.Dataset):
 
             # in case of fine tuning, is_reg is always False
             loss_weights.append(self.prior_loss_weight if image_info.is_reg else 1.0)
+            is_reg_list.append(image_info.is_reg)
 
             flipped = subset.flip_aug and random.random() < 0.5  # not flipped or flipped with 50% chance
 
@@ -2058,6 +2060,7 @@ class BaseDataset(torch.utils.data.Dataset):
         example["crop_top_lefts"] = torch.stack([torch.LongTensor(x) for x in crop_top_lefts])
         example["target_sizes_hw"] = torch.stack([torch.LongTensor(x) for x in target_sizes_hw])
         example["flippeds"] = flippeds
+        example["is_reg"] = torch.BoolTensor(is_reg_list)
 
         example["network_multipliers"] = torch.FloatTensor([self.network_multiplier] * len(captions))
 

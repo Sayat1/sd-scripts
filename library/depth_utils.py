@@ -214,7 +214,7 @@ class DepthConsistencyManager:
         self.weight_dtype = weight_dtype
         self.encoder: Optional[DifferentiableDepthEncoder] = None
         
-        if args.depth_consistency_weight > 0:
+        if args.depth_consistency_weight > 0 or args.depth_consistency_preview_every > 0:
             self.encoder = DifferentiableDepthEncoder(
                 model_id=args.depth_consistency_model_id,
                 dtype=weight_dtype,
@@ -222,8 +222,16 @@ class DepthConsistencyManager:
                 grad_checkpoint=args.gradient_checkpointing
             )
 
+    @staticmethod
+    def _to_model_device(module: Any, device: torch.device):
+        try:
+            if next(module.parameters()).device != device:
+                module.to(device)
+        except StopIteration:
+            pass
+
     def cache_depths(self, dataset_group, vae, model_type):
-        if self.encoder is None:
+        if self.encoder is None or not hasattr(dataset_group, "image_data"):
             return
         
         logger.info("Caching GT depth maps...")
@@ -256,13 +264,16 @@ class DepthConsistencyManager:
                     img_tensor = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0).float() / 255.0
                     img_tensor = img_tensor.to(self.accelerator.device)
                     
-                    # Roundtrip VAE if needed
+                    # Roundtrip VAE if needed. Use deterministic latents so GT
+                    # depth matches the cleanest image the trainer can decode.
                     if vae is not None:
+                        self._to_model_device(vae, self.accelerator.device)
                         with torch.no_grad():
                             if model_type == "anima":
                                 latents = vae.encode_pixels_to_latents(img_tensor)
                             else:
-                                latents = vae.encode(img_tensor * 2.0 - 1.0).latent_dist.sample()
+                                posterior = vae.encode(img_tensor * 2.0 - 1.0)
+                                latents = posterior.latent_dist.mode()
                             img_tensor = decode_latents_to_pixels(vae, latents, model_type)
                     
                     with torch.no_grad():
@@ -282,47 +293,80 @@ class DepthConsistencyManager:
                 
                 # Roundtrip VAE? On-the-fly usually doesn't do this during caching, but let's be consistent.
                 if vae is not None:
+                    self._to_model_device(vae, self.accelerator.device)
                     with torch.no_grad():
                         if model_type == "anima":
                             latents = vae.encode_pixels_to_latents(img_tensor)
                         else:
-                            latents = vae.encode(img_tensor * 2.0 - 1.0).latent_dist.sample()
+                            posterior = vae.encode(img_tensor * 2.0 - 1.0)
+                            latents = posterior.latent_dist.mode()
                         img_tensor = decode_latents_to_pixels(vae, latents, model_type)
                 
                 with torch.no_grad():
                     depth = self.encoder(img_tensor)[0].cpu().half()
                 image_info.depth_gt = depth
 
-    def compute_loss(self, x0_pixels, gt_depth_list, mask=None):
+    def compute_loss(
+        self,
+        x0_pixels,
+        gt_depth_list,
+        mask=None,
+        active_mask: Optional[torch.Tensor] = None,
+        weights: Optional[torch.Tensor] = None,
+        preview: bool = False,
+    ):
         if self.encoder is None:
             return None, None, None, None, None
         
-        total_loss = 0.0
+        total_loss = x0_pixels.new_zeros(())
+        weighted_loss = x0_pixels.new_zeros(())
         ssi_sum = 0.0
         grad_sum = 0.0
         first_d_pred = None
         first_d_gt = None
+        count = 0
         
         for i in range(len(gt_depth_list)):
+            if active_mask is not None and (i >= active_mask.shape[0] or not bool(active_mask[i])):
+                continue
             gt_depth = gt_depth_list[i].to(x0_pixels.device, dtype=torch.float32)
-            
-            loss, ssi, grd, d_pred, target = compute_depth_consistency_loss(
-                self.encoder,
-                x0_pixels[i:i+1],
-                gt_depth,
-                mask[i:i+1] if mask is not None else None,
-                ssi_weight=1.0,
-                grad_weight=0.5,
-                grad_scales=4
-            )
-            total_loss += loss
+
+            if preview and weights is not None and float(weights[i]) <= 0:
+                with torch.no_grad():
+                    loss, ssi, grd, d_pred, target = compute_depth_consistency_loss(
+                        self.encoder,
+                        x0_pixels[i:i+1].detach(),
+                        gt_depth,
+                        mask[i:i+1] if mask is not None else None,
+                        ssi_weight=getattr(self.args, "depth_consistency_ssi_weight", 1.0),
+                        grad_weight=getattr(self.args, "depth_consistency_grad_weight", 0.5),
+                        grad_scales=getattr(self.args, "depth_consistency_grad_scales", 4),
+                    )
+            else:
+                loss, ssi, grd, d_pred, target = compute_depth_consistency_loss(
+                    self.encoder,
+                    x0_pixels[i:i+1],
+                    gt_depth,
+                    mask[i:i+1] if mask is not None else None,
+                    ssi_weight=getattr(self.args, "depth_consistency_ssi_weight", 1.0),
+                    grad_weight=getattr(self.args, "depth_consistency_grad_weight", 0.5),
+                    grad_scales=getattr(self.args, "depth_consistency_grad_scales", 4),
+                )
+
+            weight = weights[i].to(loss.device, dtype=loss.dtype) if weights is not None else loss.new_tensor(1.0)
+            total_loss = total_loss + loss
+            weighted_loss = weighted_loss + loss * weight
             ssi_sum += ssi.item()
             grad_sum += grd.item()
-            if i == 0:
+            count += 1
+            if first_d_pred is None:
                 first_d_pred = d_pred[0]
                 first_d_gt = target[0]
             
-        return total_loss / len(gt_depth_list), ssi_sum / len(gt_depth_list), grad_sum / len(gt_depth_list), first_d_pred, first_d_gt
+        if count == 0:
+            return None, None, None, None, None
+
+        return weighted_loss / count, ssi_sum / count, grad_sum / count, first_d_pred, first_d_gt
 
 def render_depth_preview(depth: torch.Tensor) -> Image.Image:
     # depth is [H, W]
