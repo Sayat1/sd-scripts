@@ -73,10 +73,11 @@ class NetworkTrainer:
         do_log = args.weight_noise_log_every > 0 and step % args.weight_noise_log_every == 0
         noise_sq = 0.0
 
-        for p in network.parameters():
-            if not p.requires_grad:
-                continue
+        trainable_params = [p for p in network.parameters() if p.requires_grad]
+        lora_params = [p for p in trainable_params if getattr(p, "_is_lora", False)]
+        params = lora_params if lora_params else trainable_params
 
+        for p in params:
             w = p.data
             if mode == "absolute":
                 sigma = float(args.weight_noise_sigma)
@@ -433,7 +434,7 @@ class NetworkTrainer:
                 network.set_multiplier(1.0)  # may be overwritten by "network_multipliers" in the next step
                 target[diff_output_pr_indices] = noise_pred_prior.to(target.dtype)
 
-        return noise_pred, target, timesteps, None
+        return noise_pred, target, timesteps, None, noisy_latents
 
     def post_process_loss(self, loss, args, timesteps: torch.IntTensor, noise_scheduler) -> torch.FloatTensor:
         if args.min_snr_gamma:
@@ -568,7 +569,7 @@ class NetworkTrainer:
                         text_encoder_conds[i] = encoded_text_encoder_conds[i]
 
         # sample noise, call unet, get target
-        noise_pred, target, timesteps, weighting = self.get_noise_pred_and_target(
+        noise_result = self.get_noise_pred_and_target(
             args,
             accelerator,
             noise_scheduler,
@@ -581,6 +582,11 @@ class NetworkTrainer:
             train_unet,
             is_train=is_train,
         )
+        if len(noise_result) == 4:
+            noise_pred, target, timesteps, weighting = noise_result
+            noisy_latents = latents
+        else:
+            noise_pred, target, timesteps, weighting, noisy_latents = noise_result
 
         # loss split logic
         use_loss_split = args.loss_split == "diffusion_depth" and is_train and global_step is not None
@@ -664,7 +670,7 @@ class NetworkTrainer:
             and depth_any_active.any()
         ):
             # Need x0_pred
-            x0_pred = self.get_x0_from_noise_pred(args, noise_pred, latents, timesteps, noise_scheduler)
+            x0_pred = self.get_x0_from_noise_pred(args, noise_pred, noisy_latents, timesteps, noise_scheduler)
             # Decode to pixels
             x0_pixels = self.decode_x0_to_pixels(vae, x0_pred)
 
@@ -1800,7 +1806,8 @@ class NetworkTrainer:
                     lr_scheduler.step()
                     optimizer.zero_grad(set_to_none=True)
 
-                    self._inject_weight_noise(args, network, global_step)
+                    if accelerator.sync_gradients:
+                        self._inject_weight_noise(args, network, global_step)
 
                 if args.scale_weight_norms:
                     keys_scaled, mean_norm, maximum_norm = accelerator.unwrap_model(network).apply_max_norm_regularization(

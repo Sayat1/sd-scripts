@@ -310,6 +310,7 @@ class AnimaNetworkTrainer(train_network.NetworkTrainer):
         padding_mask = torch.zeros(bs, 1, h_latent, w_latent, dtype=weight_dtype, device=accelerator.device)
 
         # Call model
+        noisy_latents = noisy_model_input
         noisy_model_input = noisy_model_input.unsqueeze(2)  # 4D to 5D, [B, C, H, W] -> [B, C, 1, H, W]
         with torch.set_grad_enabled(is_train), accelerator.autocast():
             model_pred = anima(
@@ -329,7 +330,7 @@ class AnimaNetworkTrainer(train_network.NetworkTrainer):
         # Loss weighting
         weighting = anima_train_utils.compute_loss_weighting_for_anima(weighting_scheme=args.weighting_scheme, sigmas=sigmas)
 
-        return model_pred, target, timesteps, weighting
+        return model_pred, target, timesteps, weighting, noisy_latents
 
     def process_batch(
         self,
