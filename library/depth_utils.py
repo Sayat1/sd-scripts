@@ -192,13 +192,6 @@ def compute_depth_consistency_loss(
     return loss, ssi.detach(), grd.detach(), d_pred.detach(), target.detach()
 
 def decode_latents_to_pixels(vae: Any, latents: torch.Tensor, model_type: str, vae_batch_size: Optional[int] = None) -> torch.Tensor:
-    if vae_batch_size is not None and latents.shape[0] > vae_batch_size:
-        pixels = [
-            decode_latents_to_pixels(vae, latents[i : i + vae_batch_size], model_type)
-            for i in range(0, latents.shape[0], vae_batch_size)
-        ]
-        return torch.cat(pixels, dim=0)
-
     if model_type == "anima":
         # anima VAE expects [-1, 1] output and has decode_to_pixels
         pixels = vae.decode_to_pixels(latents) # [-1, 1]
