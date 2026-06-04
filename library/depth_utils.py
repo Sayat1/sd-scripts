@@ -348,7 +348,7 @@ class DepthConsistencyManager:
                             latents = vae.encode_pixels_to_latents(img_tensor)
                         else:
                             posterior = vae.encode(img_tensor * 2.0 - 1.0)
-                            latents = posterior.latent_dist.mode()
+                            latents = posterior.latent_dist.mode().to(dtype=vae.dtype)
                         img_tensor = decode_latents_to_pixels(vae, latents, model_type)
                 
                 with torch.no_grad():
