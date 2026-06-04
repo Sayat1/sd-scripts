@@ -319,7 +319,7 @@ class NetworkTrainer:
             num_train_timesteps = len(getattr(noise_scheduler, "alphas_cumprod", [])) or 1000
         return t / float(num_train_timesteps)
 
-    def decode_x0_to_pixels(self, vae, x0_pred: torch.Tensor) -> torch.Tensor:
+    def decode_x0_to_pixels(self, vae, x0_pred: torch.Tensor, vae_batch_size: Optional[int] = None) -> torch.Tensor:
         try:
             vae_param = next(vae.parameters())
             if vae_param.device != x0_pred.device:
@@ -328,7 +328,7 @@ class NetworkTrainer:
             pass
 
         model_type = "anima" if "Anima" in self.__class__.__name__ else "unknown"
-        return depth_utils.decode_latents_to_pixels(vae, x0_pred / self.vae_scale_factor, model_type)
+        return depth_utils.decode_latents_to_pixels(vae, x0_pred / self.vae_scale_factor, model_type, vae_batch_size)
 
     def sample_images(self, accelerator, args, epoch, global_step, device, vae, tokenizers, text_encoder, unet):
         train_util.sample_images(accelerator, args, epoch, global_step, device, vae, tokenizers[0], text_encoder, unet)
@@ -668,7 +668,7 @@ class NetworkTrainer:
             # Need x0_pred
             x0_pred = self.get_x0_from_noise_pred(args, noise_pred, noisy_latents, timesteps, noise_scheduler)
             # Decode to pixels
-            x0_pixels = self.decode_x0_to_pixels(vae, x0_pred)
+            x0_pixels = self.decode_x0_to_pixels(vae, x0_pred, args.vae_batch_size)
 
             # Use the same alpha mask for depth loss if available.
             depth_loss, ssi, grd, d_pred, d_gt = depth_consistency_manager.compute_loss(
