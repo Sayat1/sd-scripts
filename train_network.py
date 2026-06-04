@@ -299,19 +299,15 @@ class NetworkTrainer:
 
     def get_x0_from_noise_pred(self, args, noise_pred, noisy_latents, timesteps, noise_scheduler):
         # Default implementation for SD/SDXL
+        
+        alpha_bar = noise_scheduler.alphas_cumprod[timesteps].to(device=timesteps.device, dtype=noisy_latents.dtype).view(-1, 1, 1, 1)
+        sqrt_alpha_bar = torch.sqrt(alpha_bar)
+        sqrt_one_minus_alpha_bar = torch.sqrt(1.0 - alpha_bar)
         if args.v_parameterization:
-            # x0 = sqrt(alpha) * xt - sqrt(1-alpha) * v
-            alphas_cumprod = noise_scheduler.alphas_cumprod[timesteps].view(-1, 1, 1, 1)
-            sqrt_alpha = torch.sqrt(alphas_cumprod)
-            sqrt_one_minus_alpha = torch.sqrt(1.0 - alphas_cumprod)
-            x0 = sqrt_alpha * noisy_latents - sqrt_one_minus_alpha * noise_pred
+            x0 = sqrt_alpha_bar * noisy_latents - sqrt_one_minus_alpha_bar * noise_pred
         else:
-            # Standard noise prediction
-            # x0 = (xt - sqrt(1-alpha) * epsilon) / sqrt(alpha)
-            alphas_cumprod = noise_scheduler.alphas_cumprod[timesteps].view(-1, 1, 1, 1)
-            sqrt_alpha = torch.sqrt(alphas_cumprod)
-            sqrt_one_minus_alpha = torch.sqrt(1.0 - alphas_cumprod)
-            x0 = (noisy_latents - sqrt_one_minus_alpha * noise_pred) / sqrt_alpha
+            # Standard epsilon prediction
+            x0 = (noisy_latents - sqrt_one_minus_alpha_bar * noise_pred) / sqrt_alpha_bar.clamp(min=1e-8)
         return x0
 
     def get_normalized_timesteps(self, timesteps: torch.Tensor, noise_scheduler) -> torch.Tensor:
@@ -876,14 +872,14 @@ class NetworkTrainer:
             if vae_dtype is None:
                 vae_dtype = vae.dtype
                 logger.info(f"vae_dtype is set to {vae_dtype} by the model since cast_vae() is false")
+            vae.to(accelerator.device, dtype=vae_dtype)
+            vae.requires_grad_(False)
+            vae.eval()
 
         # Depth GT caching is independent from --cache_latents. For on-the-fly
         # training we cache full resized depth maps here; __getitem__ crops and
         # flips them to match the sampled training image.
         if (args.depth_consistency_weight > 0 or args.depth_consistency_preview_every > 0) and not depth_cache_done:
-            vae.to(accelerator.device, dtype=vae_dtype)
-            vae.requires_grad_(False)
-            vae.eval()
             depth_consistency_manager.cache_depths(train_dataset_group, vae, model_version)
             if val_dataset_group is not None:
                 depth_consistency_manager.cache_depths(val_dataset_group, vae, model_version)
@@ -1222,11 +1218,6 @@ class NetworkTrainer:
         del t_enc
 
         accelerator.unwrap_model(network).prepare_grad_etc(text_encoder, unet)
-
-        if not cache_latents:  # キャッシュしない場合はVAEを使うのでVAEを準備する
-            vae.requires_grad_(False)
-            vae.eval()
-            vae.to(accelerator.device, dtype=vae_dtype)
 
         clean_memory_on_device(accelerator.device)
 
