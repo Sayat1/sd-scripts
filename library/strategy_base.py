@@ -664,7 +664,9 @@ class LatentsCachingStrategy:
 
         latents = npz["latents" + key_reso_suffix + v_suffix]
         original_size = npz["original_size" + key_reso_suffix + v_suffix].tolist()
+        original_size = [int(x) for x in original_size]
         crop_ltrb = npz["crop_ltrb" + key_reso_suffix + v_suffix].tolist()
+        crop_ltrb = [int(x) for x in crop_ltrb]
         flipped_latents = (
             npz["latents_flipped" + key_reso_suffix + v_suffix] if "latents_flipped" + key_reso_suffix + v_suffix in npz else None
         )
