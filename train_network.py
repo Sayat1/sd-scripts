@@ -848,12 +848,12 @@ class NetworkTrainer:
             vae.requires_grad_(False)
             vae.eval()
 
-            train_dataset_group.new_cache_latents(vae, accelerator)
+            train_dataset_group.new_cache_latents(vae, accelerator, depth_consistency_manager, model_version)
             if val_dataset_group is not None:
-                val_dataset_group.new_cache_latents(vae, accelerator)
+                val_dataset_group.new_cache_latents(vae, accelerator, depth_consistency_manager, model_version)
 
-            # cache depths if needed. This runs after latent caching so crop
-            # metadata and cached-latent variations can be mirrored.
+            # Fill any depths not covered by integrated latent caching, such
+            # as images whose disk latent cache was already available.
             if args.depth_consistency_weight > 0 or args.depth_consistency_preview_every > 0:
                 depth_consistency_manager.cache_depths(train_dataset_group, vae, model_version)
                 if val_dataset_group is not None:

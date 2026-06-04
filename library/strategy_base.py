@@ -439,6 +439,7 @@ class LatentsCachingStrategy:
         color_aug: bool = False,
         random_color_bg: bool = False,
         cache_variations: int = 1,
+        depth_cache_callback: Optional[Callable] = None,
     ):
         raise NotImplementedError
 
@@ -515,6 +516,7 @@ class LatentsCachingStrategy:
         random_color_bg: bool = False,
         multi_resolution: bool = False,
         cache_variations: int = 1,
+        depth_cache_callback: Optional[Callable] = None,
     ):
         """
         Default implementation for cache_batch_latents. Image loading, VAE, flipping, alpha mask handling are common.
@@ -547,6 +549,15 @@ class LatentsCachingStrategy:
 
             with torch.no_grad():
                 latents_tensors = encode_by_vae(img_tensor).to("cpu")
+
+            if depth_cache_callback is not None:
+                depth_cache_callback(
+                    image_infos,
+                    img_tensor,
+                    latents_tensors,
+                    variation_index=v if cache_variations > 1 else None,
+                )
+
             if flip_aug:
                 img_tensor_flipped = torch.flip(img_tensor, dims=[3])
                 with torch.no_grad():

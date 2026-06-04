@@ -237,6 +237,48 @@ class DepthConsistencyManager:
         except StopIteration:
             pass
 
+    def cache_depths_from_latent_cache_batch(
+        self,
+        image_infos,
+        img_tensor: torch.Tensor,
+        latents_tensor: torch.Tensor,
+        vae,
+        model_type,
+        variation_index: Optional[int] = None,
+    ):
+        if self.encoder is None:
+            return
+
+        self.encoder.to(self.accelerator.device)
+        self.encoder.eval()
+
+        with torch.no_grad():
+            if vae is not None:
+                self._to_model_device(vae, self.accelerator.device)
+                latents_tensor = latents_tensor.to(self.accelerator.device, dtype=next(vae.parameters()).dtype)
+                pixels = decode_latents_to_pixels(
+                    vae,
+                    latents_tensor,
+                    model_type,
+                    getattr(self.args, "vae_batch_size", None),
+                )
+            else:
+                pixels = ((img_tensor.float() + 1.0) * 0.5).clamp(0.0, 1.0)
+                pixels = pixels.to(self.accelerator.device)
+
+            depths = self.encoder(pixels).cpu().half()
+
+        for i, image_info in enumerate(image_infos):
+            depth = depths[i]
+            if variation_index is None:
+                image_info.depth_gt = depth
+            else:
+                if not isinstance(image_info.depth_gt, list):
+                    image_info.depth_gt = []
+                while len(image_info.depth_gt) <= variation_index:
+                    image_info.depth_gt.append(None)
+                image_info.depth_gt[variation_index] = depth
+
     def cache_depths(self, dataset_group, vae, model_type):
         if self.encoder is None or not hasattr(dataset_group, "image_data"):
             return
@@ -269,7 +311,7 @@ class DepthConsistencyManager:
                     img_np = img_np[crop_ltrb[1] : crop_ltrb[3], crop_ltrb[0] : crop_ltrb[2]]
                     
                     img_tensor = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-                    img_tensor = img_tensor.to(self.accelerator.device)
+                    img_tensor = img_tensor.to(self.accelerator.device,dtype=vae.dtype if vae is not None else torch.float32)
                     
                     # Roundtrip VAE if needed. Use deterministic latents so GT
                     # depth matches the cleanest image the trainer can decode.
@@ -296,7 +338,7 @@ class DepthConsistencyManager:
                 img_np = resize_image(img_np, img_np.shape[1], img_np.shape[0], image_info.resized_size[0], image_info.resized_size[1], image_info.resize_interpolation)
                 
                 img_tensor = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-                img_tensor = img_tensor.to(self.accelerator.device)
+                img_tensor = img_tensor.to(self.accelerator.device,dtype=vae.dtype if vae is not None else torch.float32)
                 
                 # Roundtrip VAE? On-the-fly usually doesn't do this during caching, but let's be consistent.
                 if vae is not None:

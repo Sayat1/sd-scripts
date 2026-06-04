@@ -1230,7 +1230,7 @@ class BaseDataset(torch.utils.data.Dataset):
             ]
         )
 
-    def new_cache_latents(self, model: Any, accelerator: Accelerator):
+    def new_cache_latents(self, model: Any, accelerator: Accelerator, depth_consistency_manager=None, model_type=None):
         r"""
         a brand new method to cache latents. This method caches latents with caching strategy.
         normal cache_latents method is used by default, but this method is used when caching strategy is specified.
@@ -1280,6 +1280,18 @@ class BaseDataset(torch.utils.data.Dataset):
             subset = self.image_to_subset[batch[0].image_key]
             cache_variations = subset.cache_variations if cond.random_crop or cond.color_aug or cond.random_color_bg else 1
             logger.info(f"With Cache latent variations: {cache_variations}")
+            depth_cache_callback = None
+            if depth_consistency_manager is not None and getattr(depth_consistency_manager, "encoder", None) is not None:
+                depth_cache_callback = lambda image_infos, img_tensor, latents_tensor, variation_index=None: (
+                    depth_consistency_manager.cache_depths_from_latent_cache_batch(
+                        image_infos, img_tensor, latents_tensor, model, model_type, variation_index
+                    )
+                )
+
+            cache_kwargs = {"cache_variations": cache_variations}
+            if depth_cache_callback is not None:
+                cache_kwargs["depth_cache_callback"] = depth_cache_callback
+
             caching_strategy.cache_batch_latents(
                 model,
                 batch,
@@ -1288,7 +1300,7 @@ class BaseDataset(torch.utils.data.Dataset):
                 cond.random_crop,
                 cond.color_aug,
                 cond.random_color_bg,
-                cache_variations=cache_variations,
+                **cache_kwargs,
             )
 
             # remove image from memory
@@ -2839,8 +2851,8 @@ class ControlNetDataset(BaseDataset):
     def cache_latents(self, vae, vae_batch_size=1, cache_to_disk=False, is_main_process=True):
         return self.dreambooth_dataset_delegate.cache_latents(vae, vae_batch_size, cache_to_disk, is_main_process)
 
-    def new_cache_latents(self, model: Any, accelerator: Accelerator):
-        return self.dreambooth_dataset_delegate.new_cache_latents(model, accelerator)
+    def new_cache_latents(self, model: Any, accelerator: Accelerator, depth_consistency_manager=None, model_type=None):
+        return self.dreambooth_dataset_delegate.new_cache_latents(model, accelerator, depth_consistency_manager, model_type)
 
     def new_cache_text_encoder_outputs(self, models: List[Any], is_main_process: bool):
         return self.dreambooth_dataset_delegate.new_cache_text_encoder_outputs(models, is_main_process)
@@ -2957,10 +2969,10 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
             logger.info(f"[Dataset {i}]")
             dataset.cache_latents(vae, vae_batch_size, cache_to_disk, is_main_process, file_suffix)
 
-    def new_cache_latents(self, model: Any, accelerator: Accelerator):
+    def new_cache_latents(self, model: Any, accelerator: Accelerator, depth_consistency_manager=None, model_type=None):
         for i, dataset in enumerate(self.datasets):
             logger.info(f"[Dataset {i}]")
-            dataset.new_cache_latents(model, accelerator)
+            dataset.new_cache_latents(model, accelerator, depth_consistency_manager, model_type)
         accelerator.wait_for_everyone()
 
     def cache_text_encoder_outputs(
