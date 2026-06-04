@@ -191,7 +191,30 @@ def compute_depth_consistency_loss(
     loss = ssi_weight * ssi + grad_weight * grd
     return loss, ssi.detach(), grd.detach(), d_pred.detach(), target.detach()
 
+def _get_vae_device_dtype(vae: Any, fallback_device: torch.device, fallback_dtype: torch.dtype) -> Tuple[torch.device, torch.dtype]:
+    device = getattr(vae, "device", None)
+    dtype = getattr(vae, "dtype", None)
+    try:
+        param = next(vae.parameters())
+        device = param.device
+        dtype = param.dtype
+    except StopIteration:
+        pass
+    return device or fallback_device, dtype or fallback_dtype
+
+
 def decode_latents_to_pixels(vae: Any, latents: torch.Tensor, model_type: str, vae_batch_size: Optional[int] = None) -> torch.Tensor:
+    if vae_batch_size is not None and vae_batch_size > 0 and latents.shape[0] > vae_batch_size:
+        pixels = [
+            decode_latents_to_pixels(vae, latents[i : i + vae_batch_size], model_type)
+            for i in range(0, latents.shape[0], vae_batch_size)
+        ]
+        return torch.cat(pixels, dim=0)
+
+    vae_device, vae_dtype = _get_vae_device_dtype(vae, latents.device, latents.dtype)
+    if latents.device != vae_device or latents.dtype != vae_dtype:
+        latents = latents.to(device=vae_device, dtype=vae_dtype)
+
     if model_type == "anima":
         # anima VAE expects [-1, 1] output and has decode_to_pixels
         pixels = vae.decode_to_pixels(latents) # [-1, 1]
@@ -341,7 +364,7 @@ class DepthConsistencyManager:
                             latents = vae.encode_pixels_to_latents(img_tensor)
                         else:
                             posterior = vae.encode(img_tensor * 2.0 - 1.0)
-                            latents = posterior.latent_dist.mode().to(dtype=vae.dtype)
+                            latents = posterior.latent_dist.mode()
                         img_tensor = decode_latents_to_pixels(vae, latents, model_type)
                 
                 with torch.no_grad():
