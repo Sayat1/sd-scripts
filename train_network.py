@@ -1330,21 +1330,6 @@ class NetworkTrainer:
         if val_dataset_group is not None:
             val_dataset_group.set_current_strategies()
 
-        if args.scale_lr_by_batch or args.text_encoder_start_step > 0:
-            unet_indices = []
-            te_indices = []
-            if lr_descriptions is not None:
-                for i , desc in enumerate(lr_descriptions):
-                    if "unet" in desc:
-                        unet_indices.append(i)
-                    elif "text" in  desc:
-                        te_indices.append(i)
-            else:
-                if train_unet:
-                    unet_indices = [0]
-                if train_text_encoder:
-                    te_indices = [1]
-
         # DataLoader의 프로세수：0 は persistent_workers が使えないので注意
         n_workers = min(args.max_data_loader_n_workers, os.cpu_count())  # cpu_count or max_data_loader_n_workers
 
@@ -1384,18 +1369,6 @@ class NetworkTrainer:
 
         # lr schedulerを用意する
         lr_scheduler = optimizer_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
-
-        if train_text_encoder and args.text_encoder_start_step > 0:
-            te_step_train_flag = False
-            original_text_encoder_lr = text_encoder_lr
-            text_encoder_lr = 0.0
-            scheduler_name = lr_scheduler.__class__.__name__
-            for idx in te_indices:
-                if scheduler_name == "DummyScheduler":
-                    optimizer.param_groups[idx]["lr"] = text_encoder_lr
-                else:
-                    lr_scheduler.base_lrs[idx] = text_encoder_lr
-            accelerator.print(f"set text encoder lr to 0.0 until step {args.text_encoder_start_step}")
 
         # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
         if args.full_fp16:
@@ -1774,35 +1747,6 @@ class NetworkTrainer:
                 if initial_step > 0:
                     initial_step -= 1
                     continue
-
-                if train_text_encoder and args.text_encoder_start_step > 0 and te_step_train_flag==False:
-                    if global_step >= args.text_encoder_start_step:
-                        te_step_train_flag = True
-                        text_encoder_lr = original_text_encoder_lr
-                        scheduler_name = lr_scheduler.__class__.__name__
-                        for idx in te_indices:
-                            if scheduler_name == "DummyScheduler":
-                                optimizer.param_groups[idx]["lr"] = text_encoder_lr
-                            else:
-                                lr_scheduler.scheduler.base_lrs[idx] = text_encoder_lr
-                        accelerator.print(f"start training text encoder at step {global_step}. set lr to {text_encoder_lr}")
-
-                if args.scale_lr_by_batch:
-                    batch_size = batch["latents"].shape[0]
-                    lr_factor = batch_size ** 0.5
-                    scheduler_name = lr_scheduler.__class__.__name__
-                    for idx in unet_indices:
-                        if scheduler_name == "DummyScheduler":
-                            optimizer.param_groups[idx]["lr"] = (args.unet_lr if args.unet_lr is not None else args.learning_rate) * lr_factor
-                        else:
-                            lr_scheduler.scheduler.base_lrs[idx] = (args.unet_lr if args.unet_lr is not None else args.learning_rate) * lr_factor
-
-                    if train_text_encoder:
-                        for idx in te_indices:
-                            if scheduler_name == "DummyScheduler":
-                                optimizer.param_groups[idx]["lr"] = text_encoder_lr * lr_factor
-                            else:
-                                lr_scheduler.scheduler.base_lrs[idx] = text_encoder_lr * lr_factor
 
                 with accelerator.accumulate(training_model):
                     on_step_start_for_network(text_encoder, unet)
