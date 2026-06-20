@@ -1341,7 +1341,7 @@ class NetworkTrainer:
             num_workers=n_workers,
             persistent_workers=args.persistent_data_loader_workers,
             pin_memory=accelerator.device.type == "cuda",
-            prefetch_factor=args.prefetch_factor if n_workers > 0 else None,
+            prefetch_factor=2 if n_workers > 0 else None,
         )
 
         val_dataloader = torch.utils.data.DataLoader(
@@ -1352,7 +1352,7 @@ class NetworkTrainer:
             num_workers=n_workers,
             persistent_workers=args.persistent_data_loader_workers,
             pin_memory=accelerator.device.type == "cuda",
-            prefetch_factor=args.prefetch_factor if n_workers > 0 else None,
+            prefetch_factor=2 if n_workers > 0 else None,
         )
 
         # 学習ステップ数を計算する
