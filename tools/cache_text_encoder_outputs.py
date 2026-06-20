@@ -18,6 +18,9 @@ from library import (
     strategy_flux,
     strategy_sd,
     strategy_sdxl,
+    strategy_anima,
+    anima_utils,
+    anima_train_utils,
 )
 from library import train_util
 from library import sdxl_train_util
@@ -49,18 +52,20 @@ def cache_to_disk(args: argparse.Namespace) -> None:
     if args.seed is not None:
         set_seed(args.seed)  # 乱数系列を初期化する
 
-    is_sd = not args.sdxl and not args.flux
+    is_sd = not args.sdxl and not args.flux and not args.anima
     is_sdxl = args.sdxl
     is_flux = args.flux
+    is_anima = args.anima
 
     assert (
-        is_sdxl or is_flux
-    ), "Cache text encoder outputs to disk is only supported for SDXL and FLUX models / テキストエンコーダ出力のディスクキャッシュはSDXLまたはFLUXでのみ有効です"
+        is_sdxl or is_flux or is_anima
+    ), "Cache text encoder outputs to disk is only supported for SDXL, FLUX and Anima models / テキストエンコーダ出力のディスクキャッシュはSDXL, FLUX, またはAnimaでのみ有効です"
     assert (
         is_sdxl or args.weighted_captions is None
     ), "Weighted captions are only supported for SDXL models / 重み付きキャプションはSDXLモデルでのみ有効です"
 
-    set_tokenize_strategy(is_sd, is_sdxl, is_flux, args)
+    set_tokenize_strategy(is_sd, is_sdxl, is_flux, args, is_anima)
+
 
     # データセットを準備する
     use_user_config = args.dataset_config is not None
@@ -128,7 +133,7 @@ def cache_to_disk(args: argparse.Namespace) -> None:
         text_encoder1.to(accelerator.device, weight_dtype)
         text_encoder2.to(accelerator.device, weight_dtype)
         text_encoders = [text_encoder1, text_encoder2]
-    else:
+    elif is_flux:
         clip_l = flux_utils.load_clip_l(
             args.clip_l, weight_dtype, accelerator.device, disable_mmap=args.disable_mmap_load_safetensors
         )
@@ -150,6 +155,9 @@ def cache_to_disk(args: argparse.Namespace) -> None:
             t5xxl.to(t5xxl_dtype)
 
         text_encoders = [clip_l, t5xxl]
+    elif is_anima:
+        qwen3_text_encoder, _ = anima_utils.load_qwen3_text_encoder(args.qwen3, dtype=weight_dtype, device=accelerator.device)
+        text_encoders = [qwen3_text_encoder]
 
     for text_encoder in text_encoders:
         text_encoder.requires_grad_(False)
@@ -160,7 +168,7 @@ def cache_to_disk(args: argparse.Namespace) -> None:
         text_encoder_outputs_caching_strategy = strategy_sdxl.SdxlTextEncoderOutputsCachingStrategy(
             args.cache_text_encoder_outputs_to_disk, None, args.skip_cache_check, is_weighted=args.weighted_captions
         )
-    else:
+    elif is_flux:
         text_encoder_outputs_caching_strategy = strategy_flux.FluxTextEncoderOutputsCachingStrategy(
             args.cache_text_encoder_outputs_to_disk,
             args.text_encoder_batch_size,
@@ -168,13 +176,19 @@ def cache_to_disk(args: argparse.Namespace) -> None:
             is_partial=False,
             apply_t5_attn_mask=args.apply_t5_attn_mask,
         )
+    elif is_anima:
+        text_encoder_outputs_caching_strategy = strategy_anima.AnimaTextEncoderOutputsCachingStrategy(
+            args.cache_text_encoder_outputs_to_disk, args.text_encoder_batch_size, args.skip_cache_check, is_partial=False
+        )
     strategy_base.TextEncoderOutputsCachingStrategy.set_strategy(text_encoder_outputs_caching_strategy)
 
     # build text encoding strategy
     if is_sdxl:
         text_encoding_strategy = strategy_sdxl.SdxlTextEncodingStrategy()
-    else:
+    elif is_flux:
         text_encoding_strategy = strategy_flux.FluxTextEncodingStrategy(args.apply_t5_attn_mask)
+    elif is_anima:
+        text_encoding_strategy = strategy_anima.AnimaTextEncodingStrategy()
     strategy_base.TextEncodingStrategy.set_strategy(text_encoding_strategy)
 
     # cache text encoder outputs
@@ -195,10 +209,13 @@ def setup_parser() -> argparse.ArgumentParser:
     train_util.add_masked_loss_arguments(parser)
     config_util.add_config_arguments(parser)
     train_util.add_dit_training_arguments(parser)
-    flux_train_utils.add_flux_train_arguments(parser)
+    #flux_train_utils.add_flux_train_arguments(parser)
+    anima_train_utils.add_anima_training_arguments(parser)
 
     parser.add_argument("--sdxl", action="store_true", help="Use SDXL model / SDXLモデルを使用する")
     parser.add_argument("--flux", action="store_true", help="Use FLUX model / FLUXモデルを使用する")
+    parser.add_argument("--anima", action="store_true", help="Use Anima model / Animaモデルを使用する")
+
     parser.add_argument(
         "--t5xxl_dtype",
         type=str,
@@ -223,7 +240,7 @@ def setup_parser() -> argparse.ArgumentParser:
 if __name__ == "__main__":
     parser = setup_parser()
 
-    args = parser.parse_args()
+    args,_ = parser.parse_known_args()
     args = train_util.read_config_from_file(args, parser)
 
     cache_to_disk(args)
