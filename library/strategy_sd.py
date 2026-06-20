@@ -180,8 +180,7 @@ class SdSdxlLatentsCachingStrategy(LatentsCachingStrategy):
         random_crop: bool,
         color_aug: bool = False,
         random_color_bg: bool = False,
-        cache_variations: int = 1,
-        depth_cache_callback=None,
+        cache_variations: int = 1
     ):
         encode_by_vae = lambda img_tensor: vae.encode(img_tensor).latent_dist.sample()
         vae_device = vae.device
@@ -198,8 +197,7 @@ class SdSdxlLatentsCachingStrategy(LatentsCachingStrategy):
             color_aug,
             random_color_bg,
             multi_resolution=True,
-            cache_variations=cache_variations,
-            depth_cache_callback=depth_cache_callback,
+            cache_variations=cache_variations
         )
 
         if not accelerator_setup.HIGH_VRAM:
