@@ -364,7 +364,6 @@ class AnimaNetworkTrainer(train_network.NetworkTrainer):
         train_text_encoder=True,
         train_unet=True,
         global_step=None,
-        depth_consistency_manager=None,
     ) -> torch.Tensor:
         """Override base process_batch for caption dropout with cached text encoder outputs."""
 
@@ -399,7 +398,6 @@ class AnimaNetworkTrainer(train_network.NetworkTrainer):
             train_text_encoder,
             train_unet,
             global_step=global_step,
-            depth_consistency_manager=depth_consistency_manager,
         )
 
     def post_process_loss(self, loss, args, timesteps, noise_scheduler):

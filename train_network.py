@@ -56,7 +56,6 @@ from library.custom_train_functions import (
     apply_masked_loss,
 )
 from library.utils import setup_logging, add_logging_arguments, colab_delete_file
-from library import depth_utils
 
 setup_logging()
 import logging
@@ -69,9 +68,6 @@ class NetworkTrainer:
         self.vae_scale_factor = 0.18215
         self.is_sdxl = False
         self._last_weight_noise_norm = None
-        self._last_depth_loss = None
-        self._last_ssi_loss = None
-        self._last_grad_loss = None
 
     def _inject_weight_noise(self, args, network, global_step):
         if args.weight_noise_mode is None:
@@ -125,13 +121,6 @@ class NetworkTrainer:
         mean_combined_norm=None,
     ):
         logs = {"loss/current": current_loss, "loss/average": avr_loss}
-        if self._last_depth_loss is not None:
-            logs["loss/depth"] = self._last_depth_loss
-            logs["loss/ssi"] = self._last_ssi_loss
-            logs["loss/grad"] = self._last_grad_loss
-            self._last_depth_loss = None
-            self._last_ssi_loss = None
-            self._last_grad_loss = None
 
         if keys_scaled is not None:
             logs["max_norm/keys_scaled"] = keys_scaled
@@ -329,17 +318,6 @@ class NetworkTrainer:
             num_train_timesteps = len(getattr(noise_scheduler, "alphas_cumprod", [])) or 1000
         return t / float(num_train_timesteps)
 
-    def decode_x0_to_pixels(self, vae, x0_pred: torch.Tensor, vae_batch_size: Optional[int] = None) -> torch.Tensor:
-        try:
-            vae_param = next(vae.parameters())
-            if vae_param.device != x0_pred.device:
-                vae.to(x0_pred.device)
-        except StopIteration:
-            pass
-
-        model_type = "anima" if "Anima" in self.__class__.__name__ else "unknown"
-        return depth_utils.decode_latents_to_pixels(vae, x0_pred / self.vae_scale_factor, model_type, vae_batch_size)
-
     def sample_images(self, accelerator, args, epoch, global_step, device, vae, tokenizers, text_encoder, unet):
         sampling.sample_images(accelerator, args, epoch, global_step, device, vae, tokenizers[0], text_encoder, unet)
 
@@ -501,7 +479,6 @@ class NetworkTrainer:
         train_text_encoder=True,
         train_unet=True,
         global_step=None,
-        depth_consistency_manager=None,
     ) -> torch.Tensor:
         """
         Process a batch for the network
@@ -594,12 +571,6 @@ class NetworkTrainer:
         else:
             noise_pred, target, timesteps, weighting, noisy_latents = noise_result
 
-        # loss split logic
-        use_loss_split = args.loss_split == "diffusion_depth" and is_train and global_step is not None
-        step_is_diffusion = True
-        if use_loss_split:
-            step_is_diffusion = (global_step % 2 == 0)
-
         huber_c = loss_util.get_huber_threshold_if_needed(args, timesteps, noise_scheduler)
         loss = loss_util.conditional_loss(noise_pred.float(), target.float(), args.loss_type, "none", huber_c)
         if weighting is not None:
@@ -629,79 +600,9 @@ class NetworkTrainer:
                 # We can call apply_masked_loss with a dummy ones tensor to get the mask_image
                 _, mask_image = apply_masked_loss(torch.ones_like(loss), batch, min_mask=args.minimum_masked_loss_weight, bg_weights=bg_weights)
 
-        # zero out diffusion loss if it's a depth step
-        if use_loss_split and not step_is_diffusion:
-            loss = loss * 0.0
-
         # apply mask to diffusion loss
         if masking_loss and mask_image is not None:
             loss = loss * mask_image
-
-        # depth consistency loss
-        depth_loss = None
-        gt_depth_list = batch.get("depth_gt_list", None)
-        preview_step = (
-            args.depth_consistency_preview_every > 0
-            and global_step is not None
-            and global_step % args.depth_consistency_preview_every == 0
-        )
-        if (
-            depth_consistency_manager is not None
-            and depth_consistency_manager.encoder is not None
-            and gt_depth_list is not None
-            and (args.depth_consistency_weight > 0 or preview_step)
-        ):
-            t_norm = self.get_normalized_timesteps(timesteps, noise_scheduler)
-            depth_min_t = getattr(args, "depth_consistency_min_t", 0.0)
-            depth_max_t = getattr(args, "depth_consistency_max_t", 1.0)
-            depth_in_band = (t_norm >= depth_min_t) & (t_norm <= depth_max_t)
-
-            is_reg = batch.get("is_reg", None)
-            if is_reg is not None:
-                depth_in_band = depth_in_band & (~is_reg.to(depth_in_band.device))
-
-            depth_weights = torch.full_like(t_norm, float(args.depth_consistency_weight))
-            if use_loss_split and step_is_diffusion:
-                depth_weights = depth_weights * 0.0
-
-            depth_active = depth_in_band & (depth_weights > 0)
-            depth_preview_active = depth_in_band & (depth_weights == 0) if preview_step else torch.zeros_like(depth_active)
-            depth_any_active = depth_active | depth_preview_active
-
-        if (
-            depth_consistency_manager is not None
-            and depth_consistency_manager.encoder is not None
-            and gt_depth_list is not None
-            and (args.depth_consistency_weight > 0 or preview_step)
-            and depth_any_active.any()
-        ):
-            # Need x0_pred
-            x0_pred = self.get_x0_from_noise_pred(args, noise_pred, noisy_latents, timesteps, noise_scheduler)
-            # Decode to pixels
-            x0_pixels = self.decode_x0_to_pixels(vae, x0_pred, args.vae_batch_size)
-
-            # Use the same alpha mask for depth loss if available.
-            depth_loss, ssi, grd, d_pred, d_gt = depth_consistency_manager.compute_loss(
-                x0_pixels,
-                gt_depth_list,
-                mask=mask_image,
-                active_mask=depth_any_active,
-                weights=depth_weights,
-                preview=preview_step,
-            )
-
-            if depth_loss is not None:
-                self._last_depth_loss = depth_loss.detach().item()
-                self._last_ssi_loss = ssi
-                self._last_grad_loss = grd
-
-                # preview
-                if preview_step and accelerator.is_main_process and d_pred is not None and d_gt is not None:
-                    depth_preview_parent = os.path.join(args.output_dir, args.output_name, "depth_previews")
-                    os.makedirs(depth_preview_parent, exist_ok=True)
-                    output_path = os.path.join(depth_preview_parent, f"depth_preview_{global_step:06d}.png")
-                    preview_index = int(depth_any_active.nonzero(as_tuple=False)[0].item())
-                    depth_utils.save_depth_comparison(x0_pixels[preview_index].detach(), d_pred, d_gt, output_path)
 
         dim_range = list(range(1, loss.ndim))
         if masking_loss and args.masked_loss_normalize and mask_image is not None:
@@ -716,8 +617,6 @@ class NetworkTrainer:
         loss = self.post_process_loss(loss, args, timesteps, noise_scheduler)
 
         total_loss = loss.mean()
-        if depth_loss is not None:
-            total_loss = total_loss + depth_loss
 
         return total_loss
 
@@ -1239,11 +1138,7 @@ class NetworkTrainer:
         weight_dtype, save_dtype = accelerator_setup.prepare_dtype(args)
         vae_dtype = (torch.float32 if args.no_half_vae else weight_dtype) if self.cast_vae(args) else None
 
-        # initialize depth consistency manager
-        depth_consistency_manager = depth_utils.DepthConsistencyManager(args, accelerator, weight_dtype)
-
         model_version = "unknown"
-        depth_cache_done = False
 
         # prepare dataset for latents caching if needed
         if cache_latents:
@@ -1257,17 +1152,9 @@ class NetworkTrainer:
             vae.requires_grad_(False)
             vae.eval()
 
-            train_dataset_group.new_cache_latents(vae, accelerator, depth_consistency_manager, model_version)
+            train_dataset_group.new_cache_latents(vae, accelerator)
             if val_dataset_group is not None:
-                val_dataset_group.new_cache_latents(vae, accelerator, depth_consistency_manager, model_version)
-
-            # Fill any depths not covered by integrated latent caching, such
-            # as images whose disk latent cache was already available.
-            if args.depth_consistency_weight > 0 or args.depth_consistency_preview_every > 0:
-                depth_consistency_manager.cache_depths(train_dataset_group, vae, model_version)
-                if val_dataset_group is not None:
-                    depth_consistency_manager.cache_depths(val_dataset_group, vae, model_version)
-                depth_cache_done = True
+                val_dataset_group.new_cache_latents(vae, accelerator)
 
             if model_version == "unknown":
                 del vae
@@ -1284,16 +1171,6 @@ class NetworkTrainer:
             vae.to(accelerator.device, dtype=vae_dtype)
             vae.requires_grad_(False)
             vae.eval()
-
-        # Depth GT caching is independent from --cache_latents. For on-the-fly
-        # training we cache full resized depth maps here; __getitem__ crops and
-        # flips them to match the sampled training image.
-        if (args.depth_consistency_weight > 0 or args.depth_consistency_preview_every > 0) and not depth_cache_done:
-            depth_consistency_manager.cache_depths(train_dataset_group, vae, model_version)
-            if val_dataset_group is not None:
-                depth_consistency_manager.cache_depths(val_dataset_group, vae, model_version)
-            clean_memory_on_device(accelerator.device)
-            accelerator.wait_for_everyone()
 
         # text_encoder is List[CLIPTextModel] or CLIPTextModel
         text_encoders = text_encoder if isinstance(text_encoder, list) else [text_encoder]
@@ -1950,7 +1827,6 @@ class NetworkTrainer:
                         train_text_encoder=train_text_encoder,
                         train_unet=train_unet,
                         global_step=global_step,
-                        depth_consistency_manager=depth_consistency_manager,
                     )
 
                     accelerator.backward(loss)
@@ -2392,62 +2268,6 @@ def setup_parser() -> argparse.ArgumentParser:
         default=1.25e-2,
         help="sigma for weight noise / 重みノイズのsigma値",
     )
-    parser.add_argument(
-        "--depth_consistency_weight",
-        type=float,
-        default=0.0,
-        help="Weight for depth-consistency loss. Default is 0.0 (disabled). / Depth-consistency lossの重み。デフォルトは0.0（無効）",
-    )
-    parser.add_argument(
-        "--depth_consistency_model_id",
-        type=str,
-        default="depth-anything/Depth-Anything-V2-Small-hf",
-        help="Model ID for Depth-Anything-V2. / Depth-Anything-V2のモデルID",
-    )
-    parser.add_argument(
-        "--depth_consistency_preview_every",
-        type=int,
-        default=0,
-        help="Preview depth consistency every N steps. / Nステップごとにdepth consistencyのプレビューを表示する",
-    )
-    parser.add_argument(
-        "--depth_consistency_min_t",
-        type=float,
-        default=0.0,
-        help="Minimum normalized timestep for depth-consistency loss. / Depth-consistency lossを適用する正規化timestepの下限",
-    )
-    parser.add_argument(
-        "--depth_consistency_max_t",
-        type=float,
-        default=1.0,
-        help="Maximum normalized timestep for depth-consistency loss. / Depth-consistency lossを適用する正規化timestepの上限",
-    )
-    parser.add_argument(
-        "--depth_consistency_ssi_weight",
-        type=float,
-        default=1.0,
-        help="SSI L1 component weight for depth-consistency loss. / Depth-consistency SSI L1成分の重み",
-    )
-    parser.add_argument(
-        "--depth_consistency_grad_weight",
-        type=float,
-        default=0.5,
-        help="Multiscale gradient component weight for depth-consistency loss. / Depth-consistency multi-scale gradient成分の重み",
-    )
-    parser.add_argument(
-        "--depth_consistency_grad_scales",
-        type=int,
-        default=4,
-        help="Number of multiscale gradient levels for depth-consistency loss. / Depth-consistency gradient lossのscale数",
-    )
-    parser.add_argument(
-        "--loss_split",
-        type=str,
-        default=None,
-        choices=[None, "diffusion_depth"],
-        help="Enable loss splitting between diffusion and depth-consistency. / diffusion lossとdepth-consistency lossの分割を有効にする",
-    )
-
     parser.add_argument(
         "--weight_noise_log_every",
         type=int,
