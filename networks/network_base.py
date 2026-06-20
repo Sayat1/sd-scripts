@@ -41,8 +41,7 @@ def detect_arch_config(unet, text_encoders) -> ArchConfig:
             unet_prefix="lora_unet",
             te_prefixes=["lora_te1", "lora_te2"],
             default_excludes=[],
-            #unet_conv_target_modules=["ResnetBlock2D", "Downsample2D", "Upsample2D"],
-            unet_conv_target_modules=["ResnetBlock2D"],
+            unet_conv_target_modules=["ResnetBlock2D", "Downsample2D", "Upsample2D"],
         )
 
     # Check Anima: look for Block class in named_modules
@@ -83,45 +82,6 @@ def _parse_kv_pairs(kv_pair_str: str, is_int: bool) -> Dict[str, Union[int, floa
             logger.warning(f"Invalid value for {key}: {value}")
     return pairs
 
-def _parse_kv_dims(kv_pair_str: str) -> Dict[str, tuple[int, float]]:
-    """Parse a string of key-value pairs separated by commas."""
-    pairs = {}
-    for pair in kv_pair_str.split(","):
-        pair = pair.strip()
-        if not pair:
-            continue
-        if "=" not in pair:
-            logger.warning(f"Invalid format: {pair}, expected 'key=value'")
-            continue
-        key, value = pair.split("=", 1)
-        key = key.strip()
-        value = value.strip().lower()
-        try:
-            splited_value = value.split('a')
-            dim = int(splited_value[0])
-            if len(splited_value) > 1:
-                alpha = float(splited_value[1])
-            else:
-                alpha = float(dim)
-            pairs[key] = (dim,alpha)
-        except ValueError:
-            logger.warning(f"Invalid value for {key}: {value}")
-    return pairs
-
-def _parse_kv_kwargs(kv_pair_str: str) -> Dict[str, dict]:
-    import ast
-    def fix_dict_string(s):
-        # key에 따옴표 붙이기
-        s = re.sub(r'(\w+)\s*:', r"'\1':", s)
-        return ast.literal_eval(s)
-    pairs = {}
-    for part in kv_pair_str.split(";"):
-        key, value = part.split("=", 1)
-        key = key.strip()
-        d = fix_dict_string(value.strip())
-        pairs[key] = d
-    return pairs
-
 
 class AdditionalNetwork(torch.nn.Module):
     """Generic Additional network that supports LoHa, LoKr, and similar module types.
@@ -151,7 +111,6 @@ class AdditionalNetwork(torch.nn.Module):
         include_patterns: Optional[List[str]] = None,
         reg_dims: Optional[Dict[str, int]] = None,
         reg_lrs: Optional[Dict[str, float]] = None,
-        reg_kwargs: Optional[Dict[str, dict]] = None,
         train_llm_adapter: bool = False,
         verbose: bool = False,
     ) -> None:
@@ -169,7 +128,6 @@ class AdditionalNetwork(torch.nn.Module):
         self.train_llm_adapter = train_llm_adapter
         self.reg_dims = reg_dims
         self.reg_lrs = reg_lrs
-        self.reg_kwargs = reg_kwargs
         self.arch_config = arch_config
 
         self.loraplus_lr_ratio = None
@@ -225,7 +183,6 @@ class AdditionalNetwork(torch.nn.Module):
                         if is_linear or is_conv2d:
                             original_name = (name + "." if name else "") + child_name
                             lora_name = f"{prefix}.{original_name}".replace(".", "_")
-                            local_module_kwargs = module_kwargs.copy()
 
                             # exclude/include filter
                             excluded = any(pattern.fullmatch(original_name) for pattern in exclude_re_patterns)
@@ -246,8 +203,9 @@ class AdditionalNetwork(torch.nn.Module):
                                 if self.reg_dims is not None:
                                     for reg, d in self.reg_dims.items():
                                         if re.fullmatch(reg, original_name):
-                                            dim, alpha_val = d
-                                            logger.info(f"Module {original_name} matched with regex '{reg}' -> dim: {dim}, alpha: {alpha_val}")
+                                            dim = d
+                                            alpha_val = self.alpha
+                                            logger.info(f"Module {original_name} matched with regex '{reg}' -> dim: {dim}")
                                             break
                                 # fallback to default dim
                                 if dim is None:
@@ -257,12 +215,6 @@ class AdditionalNetwork(torch.nn.Module):
                                     elif is_conv2d and self.conv_lora_dim is not None:
                                         dim = self.conv_lora_dim
                                         alpha_val = self.conv_alpha
-
-                            if self.reg_kwargs is not None:
-                                for reg, d in self.reg_kwargs.items():
-                                    if re.fullmatch(reg, original_name):
-                                        local_module_kwargs.update(d)
-                                        logger.info(f"Module {original_name} matched with regex '{reg}' -> kwargs: {local_module_kwargs}")
 
                             if dim is None or dim == 0:
                                 if is_linear or is_conv2d_1x1:
@@ -278,10 +230,9 @@ class AdditionalNetwork(torch.nn.Module):
                                 dropout=dropout,
                                 rank_dropout=rank_dropout,
                                 module_dropout=module_dropout,
-                                **local_module_kwargs,
+                                **module_kwargs,
                             )
                             lora.original_name = original_name
-                            lora.parent_name = module.__class__.__name__
                             loras.append(lora)
 
                     if target_replace_modules is None:
@@ -574,11 +525,11 @@ class AdditionalNetwork(torch.nn.Module):
 
         if os.path.splitext(file)[1] == ".safetensors":
             from safetensors.torch import save_file
-            from library import train_util
+            import library.model_io as model_io
 
             if metadata is None:
                 metadata = {}
-            model_hash, legacy_hash = train_util.precalculate_safetensors_hashes(state_dict, metadata)
+            model_hash, legacy_hash = model_io.precalculate_safetensors_hashes(state_dict, metadata)
             metadata["sshs_model_hash"] = model_hash
             metadata["sshs_legacy_hash"] = legacy_hash
 

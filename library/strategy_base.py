@@ -9,9 +9,7 @@ import torch
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 
 
-# TODO remove circular import by moving ImageInfo to a separate file
-# from library.train_util import ImageInfo
-
+from library import caching
 from library.utils import setup_logging
 
 setup_logging()
