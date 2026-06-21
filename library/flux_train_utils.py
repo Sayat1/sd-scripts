@@ -476,29 +476,43 @@ def get_noisy_model_input_and_timesteps(
     bsz, h, w = latents.shape[0], latents.shape[-2], latents.shape[-1]
     assert bsz > 0, "Batch size not large enough"
     num_timesteps = noise_scheduler.config.num_train_timesteps
+
+    t_min = 0 if getattr(args, "min_timestep", None) is None else args.min_timestep
+    t_max = num_timesteps if getattr(args, "max_timestep", None) is None else args.max_timestep
+    t_min = max(0, min(t_min, num_timesteps))
+    t_max = max(0, min(t_max, num_timesteps))
+
+    def scale_timesteps(u: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        if t_min < t_max:
+            timesteps = u * (t_max - t_min) + t_min
+        else:
+            timesteps = torch.full_like(u, float(t_max))
+        sigmas = timesteps / num_timesteps
+        return timesteps, sigmas
+
     if args.timestep_sampling == "uniform" or args.timestep_sampling == "sigmoid":
         # Simple random sigma-based noise sampling
         if args.timestep_sampling == "sigmoid":
             # https://github.com/XLabs-AI/x-flux/tree/main
-            sigmas = torch.sigmoid(args.sigmoid_scale * torch.randn((bsz,), device=device))
+            u = torch.sigmoid(args.sigmoid_scale * torch.randn((bsz,), device=device))
         else:
-            sigmas = torch.rand((bsz,), device=device)
+            u = torch.rand((bsz,), device=device)
 
-        timesteps = sigmas * num_timesteps
+        timesteps, sigmas = scale_timesteps(u)
     elif args.timestep_sampling == "shift":
         shift = args.discrete_flow_shift
-        sigmas = torch.randn(bsz, device=device)
-        sigmas = sigmas * args.sigmoid_scale  # larger scale for more uniform sampling
-        sigmas = sigmas.sigmoid()
-        sigmas = (sigmas * shift) / (1 + (shift - 1) * sigmas)
-        timesteps = sigmas * num_timesteps
+        u = torch.randn(bsz, device=device)
+        u = u * args.sigmoid_scale  # larger scale for more uniform sampling
+        u = u.sigmoid()
+        u = (u * shift) / (1 + (shift - 1) * u)
+        timesteps, sigmas = scale_timesteps(u)
     elif args.timestep_sampling == "flux_shift":
-        sigmas = torch.randn(bsz, device=device)
-        sigmas = sigmas * args.sigmoid_scale  # larger scale for more uniform sampling
-        sigmas = sigmas.sigmoid()
+        u = torch.randn(bsz, device=device)
+        u = u * args.sigmoid_scale  # larger scale for more uniform sampling
+        u = u.sigmoid()
         mu = get_lin_function(y1=0.5, y2=1.15)((h // 2) * (w // 2))  # we are pre-packed so must adjust for packed size
-        sigmas = time_shift(mu, 1.0, sigmas)
-        timesteps = sigmas * num_timesteps
+        u = time_shift(mu, 1.0, u)
+        timesteps, sigmas = scale_timesteps(u)
     else:
         # Sample a random timestep for each image
         # for weighting schemes where we sample timesteps non-uniformly
@@ -509,8 +523,13 @@ def get_noisy_model_input_and_timesteps(
             logit_std=args.logit_std,
             mode_scale=args.mode_scale,
         )
-        indices = (u * num_timesteps).long()
-        timesteps = noise_scheduler.timesteps[indices].to(device=device)
+
+        schedule_timesteps = noise_scheduler.timesteps.to(device=device)
+        selectable_indices = torch.where((schedule_timesteps >= t_min) & (schedule_timesteps < t_max))[0]
+        if len(selectable_indices) == 0:
+            selectable_indices = torch.argmin(torch.abs(schedule_timesteps - t_max)).view(1)
+        indices = (u.to(device=device) * len(selectable_indices)).long().clamp(max=len(selectable_indices) - 1)
+        timesteps = schedule_timesteps[selectable_indices[indices]]
         sigmas = get_sigmas(noise_scheduler, timesteps, device, n_dim=latents.ndim, dtype=dtype)
 
     # Broadcast sigmas to latent shape
